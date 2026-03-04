@@ -1,0 +1,443 @@
+---
+title: gssh invite
+description: Create and manage cryptographically signed invite tokens for relay and machine access
+---
+
+## Overview
+
+The `gssh invite` commands create **root-signed invite tokens** that grant access to relays and machines. These tokens are:
+
+- **Cryptographically signed** with your user root identity (Ed25519)
+- **Time-limited** with configurable expiration (hours, days, or weeks)
+- **Usage-limited** with configurable max uses (or unlimited)
+- **Tamper-proof** - any modification invalidates the signature
+- **Self-contained** - include all necessary context (relay URL, machine ID, etc.)
+
+<Note>
+  Invites are an **owner-driven** access control mechanism. Only the user root identity owner can create invites. Recipients use these tokens to prove they were authorized by the owner.
+</Note>
+
+## Invite Types
+
+### relay-machine
+
+Allows a specific machine to enroll with a relay server.
+
+**Use case**: You run a relay server and want to authorize a new machine to connect and serve terminals.
+
+**Flow**:
+1. Machine operator shares their public keys with you
+2. You create a `relay-machine` invite
+3. Machine operator runs `gssh machine enroll --invite <token>`
+4. Machine can now connect to your relay and serve sessions
+
+---
+
+## Commands
+
+### gssh invite relay-machine create
+
+Create a relay-machine enrollment invite token.
+
+```bash
+gssh invite relay-machine create [options]
+```
+
+<ParamField path="--relay" type="string" required>
+  Relay WebSocket URL (e.g. `ws://localhost:4480/ws` or `wss://relay.example.com/ws`). If omitted, uses the relay URL from your relay config (`~/.gitspace/.identity/relay.json`).
+</ParamField>
+
+<ParamField path="--machine-signing-key" type="string" required>
+  Base64-encoded Ed25519 public signing key of the target machine (32 bytes). The machine operator can get this from their identity export.
+</ParamField>
+
+<ParamField path="--machine-key-exchange-key" type="string" required>
+  Base64-encoded X25519 public key exchange key of the target machine (32 bytes).
+</ParamField>
+
+<ParamField path="--expires" type="string" default="24h">
+  Duration until the invite expires. Format: `<number><unit>` where unit is `h` (hours), `d` (days), or `w` (weeks).
+  
+  Examples: `1h`, `7d`, `2w`, `48h`
+</ParamField>
+
+<ParamField path="--max-uses" type="string" default="1">
+  Maximum number of times the invite can be used. Use `unlimited` (or `infinite`, `inf`) for no limit.
+  
+  Examples: `1`, `5`, `unlimited`
+</ParamField>
+
+<ParamField path="--label" type="string">
+  Optional human-readable label for tracking this invite (e.g. "Alice's dev machine").
+</ParamField>
+
+#### Example
+
+```bash
+$ gssh invite relay-machine create \
+  --relay wss://relay.example.com/ws \
+  --machine-signing-key "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" \
+  --machine-key-exchange-key "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=" \
+  --expires 7d \
+  --max-uses 1 \
+  --label "Alice's MacBook"
+
+Enter password to unlock identity: ••••••••
+Relay-machine invite created
+  Invite ID: inv_1a2b3c4d5e6f7g8h9i0j
+  Machine:   mch_9z8y7x6w5v4u3t2s1r0q
+  Expires:   Jan 22, 2026, 3:45 PM (7 days)
+  Max uses:  1
+
+Invite Token:
+gssh-invite:relay-machine:v1:eyJhbGciOiJFZDI1NTE5IiwidHlwIjoiSldUIn0.eyJpbnZpdGVJZCI6Imludl8xYTJiM2M0ZDVlNmY3ZzhoOWkwaiIsInR5cGUiOiJyZWxheS1tYWNoaW5lIiwib3duZXJJZCI6InVzcl9hYmMxMjMiLCJyZWxheVVybCI6IndzczovL3JlbGF5LmV4YW1wbGUuY29tL3dzIiwidGFyZ2V0TWFjaGluZUlkIjoibWNoXzl6OHk3eDZ3NXY0dTN0MnMxcjBxIiwiZXhwaXJlc0F0IjoxNzA1OTI4NzAwMDAwLCJtYXhVc2VzIjoxLCJsYWJlbCI6IkFsaWNlJ3MgTWFjQm9vayJ9.c2lnbmF0dXJlX2hlcmU
+
+Enroll command:
+  gssh machine enroll --invite "gssh-invite:relay-machine:v1:eyJ..."
+```
+
+<Warning>
+  The machine operator must provide their **public keys** to you. Never share your private keys. They can export their public key with:
+  
+  ```bash
+  gssh user identity export
+  ```
+</Warning>
+
+---
+
+### gssh invite list
+
+List all invites you've created on a relay.
+
+```bash
+gssh invite list [options]
+```
+
+<ParamField path="--relay" type="string">
+  Relay URL to query. If omitted, uses the relay URL from your config.
+</ParamField>
+
+<ParamField path="--type" type="string">
+  Filter by invite type. Currently only `relay-machine` is supported.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Output in JSON format for scripting.
+</ParamField>
+
+#### Example
+
+```bash
+$ gssh invite list --relay wss://relay.example.com/ws
+Enter password to unlock identity: ••••••••
+
+Invites:
+
+inv_1a2b3c4d5e6f7g8h9i0j  relay-machine
+  Uses:    1/1
+  Expires: 2026-01-22T15:45:00.000Z
+  Machine: mch_9z8y7x6w5v4u3t2s1r0q
+  Label:   Alice's MacBook
+
+inv_2b3c4d5e6f7g8h9i0j1k  relay-machine
+  Uses:    0/5
+  Expires: 2026-01-29T10:30:00.000Z
+  Machine: mch_8y7x6w5v4u3t2s1r0q9p
+  Label:   Bob's Ubuntu server
+
+inv_3c4d5e6f7g8h9i0j1k2l  relay-machine
+  Uses:    3/∞
+  Expires: 2026-02-15T08:00:00.000Z
+  Machine: mch_7x6w5v4u3t2s1r0q9p8o
+  Status:  revoked (2026-01-16T12:00:00.000Z)
+```
+
+#### JSON output
+
+```bash
+$ gssh invite list --json
+[
+  {
+    "inviteId": "inv_1a2b3c4d5e6f7g8h9i0j",
+    "inviteType": "relay-machine",
+    "relayUrl": "wss://relay.example.com/ws",
+    "label": "Alice's MacBook",
+    "maxUses": 1,
+    "usedCount": 1,
+    "expiresAt": "2026-01-22T15:45:00.000Z",
+    "createdAt": "2026-01-15T15:45:00.000Z",
+    "machineId": "mch_9z8y7x6w5v4u3t2s1r0q"
+  },
+  {
+    "inviteId": "inv_2b3c4d5e6f7g8h9i0j1k",
+    "inviteType": "relay-machine",
+    "relayUrl": "wss://relay.example.com/ws",
+    "label": "Bob's Ubuntu server",
+    "maxUses": 5,
+    "usedCount": 0,
+    "expiresAt": "2026-01-29T10:30:00.000Z",
+    "createdAt": "2026-01-20T10:30:00.000Z",
+    "machineId": "mch_8y7x6w5v4u3t2s1r0q9p"
+  }
+]
+```
+
+---
+
+### gssh invite revoke
+
+Revoke an invite before it expires or reaches its usage limit.
+
+```bash
+gssh invite revoke <invite-id> [options]
+```
+
+<ParamField path="invite-id" type="string" required>
+  The invite ID to revoke (e.g. `inv_1a2b3c4d5e6f7g8h9i0j`)
+</ParamField>
+
+<ParamField path="--relay" type="string">
+  Relay URL where the invite was created. If omitted, uses your relay config.
+</ParamField>
+
+#### Example
+
+```bash
+$ gssh invite revoke inv_1a2b3c4d5e6f7g8h9i0j --relay wss://relay.example.com/ws
+Enter password to unlock identity: ••••••••
+Revoked invite inv_1a2b3c4d5e6f7g8h9i0j
+```
+
+<Note>
+  Revoking an invite prevents future uses, but does **not** disconnect machines that have already enrolled. Use `gssh relay machines revoke <machine-id>` to disconnect an enrolled machine.
+</Note>
+
+---
+
+## Invite Token Format
+
+Invite tokens have the format:
+
+```
+gssh-invite:<type>:v1:<jwt>
+```
+
+### Example breakdown
+
+```
+gssh-invite:relay-machine:v1:eyJhbGciOiJFZDI1NTE5IiwidHlwIjoiSldUIn0.eyJpbnZpdGVJZCI6Imludl8xYTJiM2M0ZDVlNmY3ZzhoOWkwaiIsInR5cGUiOiJyZWxheS1tYWNoaW5lIiwib3duZXJJZCI6InVzcl9hYmMxMjMiLCJyZWxheVVybCI6IndzczovL3JlbGF5LmV4YW1wbGUuY29tL3dzIiwidGFyZ2V0TWFjaGluZUlkIjoibWNoXzl6OHk3eDZ3NXY0dTN0MnMxcjBxIiwiZXhwaXJlc0F0IjoxNzA1OTI4NzAwMDAwLCJtYXhVc2VzIjoxLCJsYWJlbCI6IkFsaWNlJ3MgTWFjQm9vayJ9.c2lnbmF0dXJlX2hlcmU
+```
+
+- **Prefix**: `gssh-invite:`
+- **Type**: `relay-machine`
+- **Version**: `v1`
+- **JWT**: Ed25519-signed token
+
+### JWT payload (relay-machine)
+
+```json
+{
+  "inviteId": "inv_1a2b3c4d5e6f7g8h9i0j",
+  "type": "relay-machine",
+  "ownerId": "usr_abc123",
+  "relayUrl": "wss://relay.example.com/ws",
+  "targetMachineId": "mch_9z8y7x6w5v4u3t2s1r0q",
+  "targetMachineSigningKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "targetMachineKeyExchangeKey": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+  "expiresAt": 1705928700000,
+  "maxUses": 1,
+  "label": "Alice's MacBook"
+}
+```
+
+The JWT is signed with your user root identity's Ed25519 signing key.
+
+---
+
+## Common Workflows
+
+### Authorize a new machine to your relay
+
+<Steps>
+  <Step title="Machine operator exports their identity">
+    They run on their machine:
+    ```bash
+    gssh user identity show --json
+    ```
+    And send you the `signingPublicKey` and `keyExchangePublicKey` values.
+  </Step>
+  <Step title="You create the invite">
+    ```bash
+    gssh invite relay-machine create \
+      --relay wss://relay.example.com/ws \
+      --machine-signing-key "<their-signing-key>" \
+      --machine-key-exchange-key "<their-kex-key>" \
+      --expires 7d \
+      --label "Alice's dev machine"
+    ```
+  </Step>
+  <Step title="Send them the token">
+    Copy the full `gssh-invite:...` token and send it securely (Signal, encrypted email, etc.)
+  </Step>
+  <Step title="They enroll">
+    They run on their machine:
+    ```bash
+    gssh machine enroll --invite "gssh-invite:relay-machine:v1:eyJ..."
+    ```
+  </Step>
+  <Step title="Verify enrollment">
+    Check that the machine is authorized:
+    ```bash
+    gssh relay machines list
+    ```
+  </Step>
+</Steps>
+
+### Audit invite usage
+
+```bash
+# List all invites
+gssh invite list
+
+# Check usage counts
+gssh invite list --json | jq '.[] | select(.usedCount < .maxUses)'
+
+# Find expired invites
+gssh invite list --json | jq '.[] | select(.expiresAt < now)'
+```
+
+### Revoke compromised invite
+
+```bash
+# List invites to find the ID
+gssh invite list
+
+# Revoke by ID
+gssh invite revoke inv_1a2b3c4d5e6f7g8h9i0j
+
+# Verify revocation
+gssh invite list | grep inv_1a2b3c4d5e6f7g8h9i0j
+# Should show "Status: revoked"
+```
+
+---
+
+## Security Model
+
+### Cryptographic guarantees
+
+1. **Authenticity**: Ed25519 signature proves the invite was created by the owner's identity
+2. **Integrity**: Any modification to the JWT payload invalidates the signature
+3. **Non-repudiation**: Only the owner's private key can create valid signatures
+4. **Expiration**: Time-based expiry prevents indefinite reuse
+5. **Usage limiting**: Max-uses cap prevents unlimited enrollment
+
+### Trust model
+
+- **Relay trusts owner**: The relay verifies the invite signature against the owner's public key
+- **Machine trusts invite**: The machine verifies the relay URL and its own machine ID are in the token
+- **Owner controls access**: Only the owner can create, list, and revoke invites
+
+### Threat mitigation
+
+| Threat | Mitigation |
+|--------|------------|
+| Token theft | Time-limited expiration + usage limits |
+| Token modification | Ed25519 signature verification |
+| Unauthorized creation | Private key required to sign |
+| Replay attacks | Invite ID is tracked by relay, enforces max-uses |
+| Man-in-the-middle | Relay URL in token + TLS for `wss://` |
+
+<Warning>
+  **Invite tokens are bearer credentials.** Anyone with the token can use it until it expires or reaches max-uses. Treat them like passwords:
+  
+  - Send over encrypted channels (Signal, PGP email)
+  - Don't commit to git or paste in public Slack
+  - Revoke immediately if compromised
+  - Use short expiration times (hours/days, not months)
+</Warning>
+
+---
+
+## Troubleshooting
+
+### "No identity found"
+
+Create a user root identity first:
+
+```bash
+gssh user identity init
+```
+
+### "Invalid relay URL"
+
+Check the format:
+
+```bash
+# Good
+ws://localhost:4480/ws
+wss://relay.example.com/ws
+
+# Bad (missing /ws path)
+ws://localhost:4480
+wss://relay.example.com
+```
+
+### "Machine signing key must be base64"
+
+The key must be a **32-byte base64-encoded** string:
+
+```bash
+# Get the correct format from machine operator:
+gssh user identity show --json | jq -r .signingPublicKey
+```
+
+### "Invalid duration format"
+
+Use `<number><unit>` format:
+
+```bash
+# Valid
+--expires 1h
+--expires 7d
+--expires 2w
+
+# Invalid
+--expires 1 hour
+--expires 7days
+--expires 2weeks
+```
+
+### "max-uses must be a positive integer or 'unlimited'"
+
+Valid formats:
+
+```bash
+--max-uses 1
+--max-uses 5
+--max-uses unlimited
+--max-uses infinite
+--max-uses inf
+```
+
+### "Relay returned an invite ID that does not match"
+
+This is a critical error indicating:
+- Relay implementation bug
+- Network tampering
+- Clock skew issues
+
+Verify:
+1. Relay server version matches CLI version
+2. System clocks are synchronized (NTP)
+3. No MITM proxy is modifying responses
+
+---
+
+## Related Commands
+
+- [gssh user identity](/cli/user/identity) - Create and manage your identity (required for signing invites)
+- [gssh machine enroll](/cli/machine/enroll) - Enroll a machine using an invite token
+- [gssh relay machines](/cli/relay/machines) - List and revoke enrolled machines
+- [gssh relay start](/cli/relay/start) - Start relay server

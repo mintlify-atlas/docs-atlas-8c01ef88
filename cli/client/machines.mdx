@@ -1,0 +1,293 @@
+---
+title: "gssh client machines list"
+description: "List machines accessible on a relay server"
+---
+
+## Overview
+
+The `gssh client machines list` command queries a relay server for all machines you can access with your current identity. It displays machine IDs, labels, online status, and authorization details.
+
+<Note>
+  This command requires your user root identity to query the relay's machine directory.
+</Note>
+
+## Usage
+
+```bash
+gssh client machines list --relay <url> [--json]
+```
+
+### Arguments
+
+<ParamField path="--relay" type="string" required>
+  Relay URL to query for machine listings.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Output machine list in JSON format for scripting.
+</ParamField>
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Authenticate identity">
+    Prompts for password to unlock your user root identity.
+  </Step>
+  
+  <Step title="Create device certificate">
+    Generates a local device certificate signed by your user root identity.
+  </Step>
+  
+  <Step title="Connect to relay">
+    Opens WebSocket connection with `?role=client` parameter.
+  </Step>
+  
+  <Step title="Request machine directory">
+    Sends relay request for all machines authorized for your identity.
+  </Step>
+  
+  <Step title="Display results">
+    Shows machine list with online status and authorization type.
+  </Step>
+</Steps>
+
+---
+
+## Examples
+
+### List Machines (Table)
+
+```bash
+gssh client machines list --relay wss://relay.example.com/ws
+```
+
+Output:
+```
+Machines:
+
+MACHINE ID           LABEL                   STATUS
+────────────────────────────────────────────────────
+abc123def456...      dev-workstation         online
+xyz789ghi012...      ci-runner-01            offline
+jkl345mno678...      staging-server          online
+```
+
+### List Machines (JSON)
+
+```bash
+gssh client machines list --relay wss://relay.example.com/ws --json
+```
+
+Output:
+```json
+[
+  {
+    "machineId": "abc123def456...",
+    "label": "dev-workstation",
+    "online": true,
+    "isAuthorized": true,
+    "accessType": "full"
+  },
+  {
+    "machineId": "xyz789ghi012...",
+    "label": "ci-runner-01",
+    "online": false,
+    "isAuthorized": true,
+    "accessType": "full"
+  },
+  {
+    "machineId": "jkl345mno678...",
+    "label": "staging-server",
+    "online": true,
+    "isAuthorized": true,
+    "accessType": "view",
+    "sessionId": "session-abc123",
+    "lastConnectedAt": 1234567890000
+  }
+]
+```
+
+### No Machines Available
+
+```bash
+gssh client machines list --relay wss://relay.example.com/ws
+```
+
+Output:
+```
+No machines available for this identity.
+```
+
+---
+
+## Output Fields
+
+### Table Format
+
+| Column | Description |
+|--------|-------------|
+| **MACHINE ID** | Unique machine identifier (truncated to 20 chars) |
+| **LABEL** | Human-readable machine name |
+| **STATUS** | `online` (green) or `offline` (gray) |
+
+### JSON Format
+
+<ParamField path="machineId" type="string">
+  Full machine identifier (Ed25519 public key hash).
+</ParamField>
+
+<ParamField path="label" type="string">
+  Human-readable label set during enrollment.
+</ParamField>
+
+<ParamField path="online" type="boolean">
+  Whether machine is currently connected to relay.
+</ParamField>
+
+<ParamField path="isAuthorized" type="boolean">
+  Whether your identity has access to this machine.
+</ParamField>
+
+<ParamField path="accessType" type="string">
+  Access level: `full` (owner) or `view` (session-specific).
+</ParamField>
+
+<ParamField path="sessionId" type="string">
+  For view access: Specific session ID you can access.
+</ParamField>
+
+<ParamField path="lastConnectedAt" type="number">
+  Unix timestamp (ms) of last connection (if applicable).
+</ParamField>
+
+---
+
+## Access Types
+
+### Full Access
+
+Granted via machine access list:
+
+```bash
+gssh machine access add <gssh-user:your-id>
+```
+
+Permissions:
+- List all workspaces
+- Create new sessions
+- Attach to any session
+- Full read/write access
+
+### View Access
+
+Granted for specific sessions (not yet implemented in current version):
+
+```bash
+gssh session share <session-id> <gssh-user:viewer-id>
+```
+
+Permissions:
+- Attach to shared session only
+- Read-only terminal output
+- No command execution
+
+---
+
+## Scripting with JSON
+
+### Extract Online Machines
+
+```bash
+gssh client machines list --relay <url> --json | \
+  jq -r '.[] | select(.online == true) | .machineId'
+```
+
+### Count Authorized Machines
+
+```bash
+gssh client machines list --relay <url> --json | \
+  jq '[.[] | select(.isAuthorized == true)] | length'
+```
+
+### Find Machine by Label
+
+```bash
+MACHINE_ID=$(gssh client machines list --relay <url> --json | \
+  jq -r '.[] | select(.label == "dev-workstation") | .machineId')
+
+gssh client connect $MACHINE_ID --relay <url>
+```
+
+---
+
+## Authorization
+
+### How Access Is Granted
+
+1. **Machine owner** grants access:
+   ```bash
+   gssh machine access add <gssh-user:your-id>
+   ```
+
+2. **Or via invite**:
+   ```bash
+   # Owner creates invite
+   gssh invite machine-user create <machine-id> <gssh-user:your-id> --relay <url>
+   
+   # You accept invite
+   gssh user auth invite accept <token>
+   ```
+
+3. Your identity is added to machine's ACL on relay
+
+4. You appear in machine list when querying relay
+
+<Note>
+  Authorization is managed per-machine, not per-relay. Different machines on the same relay may have different access lists.
+</Note>
+
+---
+
+## Troubleshooting
+
+### "No machines available for this identity"
+
+You don't have access to any machines on this relay:
+
+- Request access from machine owners
+- Verify you're using the correct identity
+- Check if you need to accept pending invites
+
+### "Timed out waiting for machine list"
+
+Relay connectivity issues:
+
+- Verify relay URL is correct and reachable
+- Check network/firewall settings
+- Confirm relay is running: `gssh relay status` (on relay host)
+
+### "Failed to unlock identity"
+
+Identity issues:
+
+- Verify password is correct
+- Ensure identity exists: `gssh user identity show`
+- Re-initialize if needed: `gssh user identity init`
+
+### Empty Label Field
+
+Machine was enrolled without `--label` flag:
+
+- Machine owner can update: `gssh machine enroll --invite <new-token> --label <name>`
+- Label defaults to machine ID if not set
+
+---
+
+## Related Commands
+
+- [`gssh client connect`](/cli/client/connect) - Connect to a machine from the list
+- [`gssh machine serve start`](/cli/machine/serve) - Make your machine accessible
+- [`gssh user identity show`](/cli/user/identity) - Display your identity ID
+- [`gssh relay machines list`](/cli/relay/machines) - View registered machines (relay owner)

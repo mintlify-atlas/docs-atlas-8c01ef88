@@ -1,122 +1,184 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "GitSpace",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#04d65e",
+    "light": "#048c3c",
+    "dark": "#04d65e"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/cc3373d0-b984-4ebb-9b4c-a901b2bc44d4.png",
+  "logo": {
+    "light": "https://media.brand.dev/cc3373d0-b984-4ebb-9b4c-a901b2bc44d4.png",
+    "dark": "https://media.brand.dev/cc3373d0-b984-4ebb-9b4c-a901b2bc44d4.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/inkibra/gitspace.sh"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/inkibra/gitspace.sh"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/projects",
+              "concepts/workspaces",
+              "concepts/bundles",
+              "concepts/scripts"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Workspace Management",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "workspace/creating",
+              "workspace/switching",
+              "workspace/configuration",
+              "workspace/session-mode"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Remote Access",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "remote/overview",
+              "remote/identity",
+              "remote/gitspace-sh",
+              "remote/self-hosted",
+              "remote/security"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/linear",
+              "integrations/github"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/tui",
+              "guides/custom-scripts",
+              "guides/bundle-creation",
+              "guides/team-onboarding"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "CLI Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Project Commands",
             "pages": [
-              "api-reference/introduction"
+              "cli/project/add",
+              "cli/project/list",
+              "cli/project/remove"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Workspace Commands",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "cli/workspace/add",
+              "cli/workspace/list",
+              "cli/workspace/context",
+              "cli/workspace/remove",
+              "cli/workspace/bundle"
+            ]
+          },
+          {
+            "group": "Identity & Access",
+            "pages": [
+              "cli/user/identity",
+              "cli/user/auth",
+              "cli/invite"
+            ]
+          },
+          {
+            "group": "Remote Access",
+            "pages": [
+              "cli/machine/serve",
+              "cli/machine/enroll",
+              "cli/client/connect",
+              "cli/client/machines"
+            ]
+          },
+          {
+            "group": "Relay Server",
+            "pages": [
+              "cli/relay/start",
+              "cli/relay/machines"
+            ]
+          },
+          {
+            "group": "Hosting",
+            "pages": [
+              "cli/host/reserve",
+              "cli/host/status"
+            ]
+          },
+          {
+            "group": "Terminal Sessions",
+            "pages": [
+              "cli/tmux/overview",
+              "cli/tmux/commands"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "cli/config/linear"
+            ]
+          },
+          {
+            "group": "Other Commands",
+            "pages": [
+              "cli/status",
+              "cli/cloud",
+              "cli/review"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/directory-structure",
+              "architecture/encryption",
+              "architecture/protocol"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/troubleshooting",
+              "advanced/environment-variables",
+              "advanced/development"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

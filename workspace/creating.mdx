@@ -1,0 +1,330 @@
+---
+title: Creating Workspaces
+description: Learn how to create workspaces using CLI and TUI
+---
+
+## Overview
+
+Workspaces in GitSpace are individual git worktrees that let you work on multiple features/branches simultaneously without stashing changes. Each workspace is isolated and contains its own branch.
+
+## Directory Structure
+
+Workspaces are created in your project directory:
+
+```
+~/gitspace/<project-name>/
+├── base/                    # Base repository clone
+└── workspaces/              # Git worktrees
+    └── <workspace-name>/
+        ├── gitspace.lock    # Setup completion marker
+        ├── .prompt/         # Linear issue details (if applicable)
+        └── .gitspace/       # Scripts and config
+```
+
+## Creating Workspaces
+
+<Tabs>
+  <Tab title="CLI">
+    ### Interactive TUI
+
+    Launch the TUI and use keyboard shortcuts:
+
+    ```bash
+    gssh
+    ```
+
+    **Key bindings:**
+    - `Tab` - Switch to workspaces panel
+    - `n` - Create new workspace
+    - `Enter` - Select and confirm
+
+    ### Command Line
+
+    Create a workspace with a specific name:
+
+    ```bash
+    gssh workspace add my-feature --project my-app
+    ```
+
+    The workspace name will be sanitized for filesystem safety. Branch-like names (e.g., `fix/bug-123`) are supported and the slash is preserved in the branch name.
+  </Tab>
+
+  <Tab title="Options">
+    ### Creation Options
+
+    Customize workspace creation with these flags:
+
+    ```bash
+    # Specify a different branch name
+    gssh workspace add my-workspace --project my-app --branch feature/custom-name
+
+    # Create from a specific branch instead of base
+    gssh workspace add hotfix --project my-app --from production
+
+    # Skip setup scripts
+    gssh workspace add my-workspace --project my-app --no-setup
+    ```
+
+    <Note>
+    When `--branch` is omitted, the workspace name is used as the branch name (with slashes preserved for names like `fix/bug`).
+    </Note>
+  </Tab>
+</Tabs>
+
+## Creation Sources
+
+GitSpace supports multiple sources for workspace creation:
+
+<Steps>
+  <Step title="From GitHub Branch">
+    Create a workspace from an existing remote branch:
+
+    ```bash
+    gssh workspace add --project my-app
+    # Select "Create from GitHub branch" when prompted
+    ```
+
+    GitSpace will:
+    1. Fetch remote branches
+    2. Filter out the base branch
+    3. Let you select from available branches
+    4. Create worktree tracking the remote branch
+
+    <CodeGroup>
+    ```bash Example
+    $ gssh workspace add --project my-app
+    How would you like to create the workspace?
+    > Create from GitHub branch
+      Create from Linear issue
+      Create with manual name
+
+    Fetching remote branches...
+    Select a branch:
+    > feature/new-ui
+      fix/memory-leak
+      chore/update-deps
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="From Linear Issue">
+    If Linear integration is configured, create a workspace directly from a Linear issue:
+
+    ```bash
+    gssh workspace add --project my-app
+    # Select "Create from Linear issue" when prompted
+    ```
+
+    This will:
+    1. Fetch unstarted issues from your Linear team
+    2. Generate a workspace name from issue ID and title
+    3. Save issue details to `.prompt/issue.md` for AI context
+
+    <CodeGroup>
+    ```bash Example
+    $ gssh workspace add --project my-app
+    Fetching Linear issues...
+    Select an issue:
+    > ENG-123 - Add user authentication
+      ENG-124 - Fix login redirect
+      ENG-125 - Update API docs
+
+    # Creates workspace: eng-123-add-user-authentication
+    ```
+    </CodeGroup>
+
+    <Note>
+    Set up Linear integration with `gssh user config linear setup --project <name>`
+    </Note>
+  </Step>
+
+  <Step title="Manual Name">
+    Create a workspace with a custom name:
+
+    ```bash
+    gssh workspace add my-feature --project my-app
+    ```
+
+    Or use the interactive prompt:
+
+    ```bash
+    gssh workspace add --project my-app
+    # Select "Create with manual name" when prompted
+    ```
+
+    **Branch name validation:**
+    - Must contain at least one letter or number
+    - Cannot contain: spaces, `..`, `:`, `?`, `*`, `[`, `\`, `~`
+    - Slashes are allowed (e.g., `fix/bug-123`)
+  </Step>
+</Steps>
+
+## Worktree Creation Process
+
+When you create a workspace, GitSpace performs these steps:
+
+<Steps>
+  <Step title="Fetch Latest Changes">
+    ```bash
+    git fetch --all --prune
+    ```
+    Ensures you have the latest remote branches.
+  </Step>
+
+  <Step title="Update Base Branch">
+    ```bash
+    git pull --ff-only origin main
+    ```
+    Fast-forwards your base branch (typically `main`) to match remote.
+  </Step>
+
+  <Step title="Create Worktree">
+    Depending on the branch status:
+
+    **If branch exists on remote:**
+    ```bash
+    git worktree add ~/gitspace/my-app/workspaces/my-feature \
+      -b my-feature origin/my-feature
+    ```
+
+    **If branch exists locally:**
+    ```bash
+    git worktree add ~/gitspace/my-app/workspaces/my-feature my-feature
+    ```
+
+    **If branch doesn't exist (new branch):**
+    ```bash
+    git worktree add -b my-feature \
+      ~/gitspace/my-app/workspaces/my-feature \
+      origin/main --no-track
+    ```
+
+    <Note>
+    The `--no-track` flag prevents setting upstream to the base branch. You should push with `-u` to set the correct upstream.
+    </Note>
+  </Step>
+
+  <Step title="Run Bundle Scripts">
+    If your repository has bundle configuration, GitSpace will:
+    1. Detect `.gitspace/bundle.json` in the workspace
+    2. Sync bundle requirements to project metadata
+    3. Make bundle values available for scripts
+  </Step>
+</Steps>
+
+## Remote Branch Detection
+
+GitSpace automatically detects if a branch exists remotely:
+
+```bash
+# Check if branch exists on remote
+git ls-remote --exit-code --heads origin my-feature
+```
+
+If the branch exists remotely, you'll be prompted:
+
+<CodeGroup>
+```bash Prompt
+Branch 'my-feature' exists on remote. Pull it down? (Y/n)
+```
+</CodeGroup>
+
+<Note>
+Selecting "Yes" will create the worktree from the remote branch, preserving all commits.
+</Note>
+
+## Linear Integration
+
+When creating a workspace from a Linear issue:
+
+<Steps>
+  <Step title="Issue Markdown">
+    Issue details are saved to `.prompt/issue.md`:
+
+    ```markdown
+    # ENG-123: Add user authentication
+
+    **Status:** Todo
+    **Priority:** High
+    **Assignee:** @username
+
+    ## Description
+
+    Implement user authentication using OAuth 2.0...
+
+    ## Acceptance Criteria
+
+    - [ ] Login flow works
+    - [ ] Tokens are stored securely
+    ```
+  </Step>
+
+  <Step title="Workspace Naming">
+    Workspace names are generated from the issue:
+
+    ```typescript
+    // Example: "ENG-123" + "Add user authentication"
+    // Result: "eng-123-add-user-authentication"
+    generateWorkspaceName(identifier, title)
+    ```
+
+    The name is sanitized to:
+    - Lowercase
+    - Replace spaces with hyphens
+    - Remove special characters
+    - Keep alphanumeric and hyphens only
+  </Step>
+</Steps>
+
+## Examples
+
+<CodeGroup>
+```bash Simple Workspace
+# Create a feature workspace
+gssh workspace add my-feature --project my-app
+
+# GitSpace creates:
+# - Workspace: ~/gitspace/my-app/workspaces/my-feature
+# - Branch: my-feature
+# - Worktree from: origin/main
+```
+
+```bash Custom Branch
+# Create workspace with different branch name
+gssh workspace add ui-redesign --project my-app --branch feature/new-ui
+
+# GitSpace creates:
+# - Workspace: ~/gitspace/my-app/workspaces/ui-redesign
+# - Branch: feature/new-ui
+```
+
+```bash From Specific Branch
+# Create workspace from production branch
+gssh workspace add hotfix --project my-app --from production
+
+# GitSpace creates:
+# - Workspace: ~/gitspace/my-app/workspaces/hotfix
+# - Branch: hotfix
+# - Worktree from: origin/production (instead of main)
+```
+
+```bash Branch-like Names
+# Workspace name with slashes (sanitized for directory)
+gssh workspace add fix/bug-123 --project my-app
+
+# GitSpace creates:
+# - Workspace: ~/gitspace/my-app/workspaces/fix-bug-123 (sanitized)
+# - Branch: fix/bug-123 (preserves slashes)
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Switching Workspaces" icon="arrow-right-arrow-left" href="/workspace/switching">
+    Learn how to switch between workspaces
+  </Card>
+  <Card title="Configuration" icon="gear" href="/workspace/configuration">
+    Configure workspace settings and scripts
+  </Card>
+</CardGroup>

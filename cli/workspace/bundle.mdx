@@ -1,0 +1,379 @@
+---
+title: "gssh workspace bundle"
+description: "Manage bundle configuration for a workspace"
+---
+
+## Synopsis
+
+```bash
+gssh workspace bundle <command> --project <name> --workspace <name> [options]
+```
+
+## Description
+
+Manages bundle configuration for a workspace. Bundles are project templates defined in `.gitspace/bundle.json` that provide:
+- Onboarding steps (inputs, secrets, confirmations)
+- Custom scripts (pre, setup, select, remove)
+- Project-specific configuration
+
+The bundle commands help you:
+- Check bundle status and detect changes
+- Refresh configuration when `bundle.json` is updated
+- Re-run onboarding with previous values as defaults
+
+## Subcommands
+
+### status
+
+Show bundle status and detect configuration changes.
+
+```bash
+gssh workspace bundle status --project <name> --workspace <name>
+```
+
+### refresh
+
+Re-run bundle onboarding, preserving previous values as defaults.
+
+```bash
+gssh workspace bundle refresh --project <name> --workspace <name> [--force]
+```
+
+---
+
+## gssh workspace bundle status
+
+Displays information about the current bundle configuration and detects if the bundle has changed since it was last applied.
+
+### Options
+
+<ParamField path="--project" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="--workspace" type="string" required>
+  Workspace name
+</ParamField>
+
+### Output Format
+
+```
+Bundle Status: myapp/feature-auth
+
+Bundle: My App Template
+Version: 1.2.0
+Path: /home/user/gitspace/myapp/workspaces/feature-auth/.gitspace/bundle.json
+Source: workspace .gitspace/bundle.json
+Onboarding steps: 3
+
+Bundle is up to date
+```
+
+If bundle has changed:
+
+```
+Bundle Status: myapp/feature-auth
+
+Bundle: My App Template
+Version: 1.3.0
+Path: /home/user/gitspace/myapp/workspaces/feature-auth/.gitspace/bundle.json
+Source: workspace .gitspace/bundle.json
+Onboarding steps: 4
+
+Bundle has changed since last applied
+  - Version changed: 1.2.0 → 1.3.0
+  - New onboarding step: database_url
+Run "gssh workspace bundle refresh --project myapp --workspace feature-auth" to update configuration
+```
+
+### Examples
+
+#### Check bundle status
+
+```bash
+gssh workspace bundle status --project myapp --workspace feature-auth
+```
+
+#### No bundle configured
+
+```
+Bundle Status: myapp/feature-auth
+
+No bundle found for this workspace
+Bundles are defined in .gitspace/bundle.json
+```
+
+#### Bundle parse error
+
+```
+Bundle Status: myapp/feature-auth
+
+Bundle file exists but could not be parsed:
+  Invalid JSON: Unexpected token } in JSON at position 145
+```
+
+---
+
+## gssh workspace bundle refresh
+
+Re-runs bundle onboarding for a workspace. Previous values are used as defaults for prompts.
+
+### Options
+
+<ParamField path="--project" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="--workspace" type="string" required>
+  Workspace name
+</ParamField>
+
+<ParamField path="--force" type="boolean" optional default="false">
+  Force refresh even if no changes detected. Useful for re-entering configuration values.
+</ParamField>
+
+### Refresh Process
+
+1. **Detect Changes**: Compares current bundle with last applied state
+2. **Load Previous Values**: Reads stored inputs and secrets
+3. **Run Onboarding**: Prompts for inputs with previous values as defaults
+4. **Apply Configuration**: Saves new values and updates state
+5. **Report Changes**: Shows which values were updated
+
+### Examples
+
+#### Refresh after bundle update
+
+```bash
+gssh workspace bundle refresh --project myapp --workspace feature-auth
+```
+
+Output:
+```
+Checking bundle for workspace: myapp/feature-auth
+Workspace path: /home/user/gitspace/myapp/workspaces/feature-auth
+
+Bundle configuration updated
+
+Updated values:
+  - api_endpoint
+  - database_url
+
+Secrets configured:
+  - stripe_api_key
+```
+
+#### Force refresh
+
+```bash
+gssh workspace bundle refresh --project myapp --workspace feature-auth --force
+```
+
+Forces re-running onboarding even if bundle hasn't changed.
+
+#### No changes detected
+
+```bash
+gssh workspace bundle refresh --project myapp --workspace feature-auth
+```
+
+Output:
+```
+Checking bundle for workspace: myapp/feature-auth
+Workspace path: /home/user/gitspace/myapp/workspaces/feature-auth
+
+No changes to apply
+```
+
+---
+
+## Bundle Detection
+
+Bundles are loaded from:
+
+1. **Workspace-level**: `.gitspace/bundle.json` in workspace directory (highest priority)
+2. **Base repo**: `.gitspace/bundle.json` in base repository
+3. **Explicit URL**: `--bundle-url` flag during `gssh workspace add`
+4. **Explicit path**: `--bundle-path` flag during `gssh workspace add`
+
+### Source Indicator
+
+The status command shows where the bundle was loaded from:
+
+- `Source: workspace .gitspace/bundle.json` - Workspace-specific bundle
+- `Source: base .gitspace/bundle.json` - Base repository bundle
+
+## Bundle Configuration Format
+
+A `bundle.json` file structure:
+
+```json
+{
+  "name": "My App Template",
+  "version": "1.0.0",
+  "onboarding": [
+    {
+      "type": "input",
+      "key": "api_endpoint",
+      "prompt": "Enter API endpoint URL:",
+      "default": "http://localhost:3000"
+    },
+    {
+      "type": "secret",
+      "key": "stripe_api_key",
+      "prompt": "Enter Stripe API key:"
+    },
+    {
+      "type": "confirm",
+      "key": "enable_analytics",
+      "prompt": "Enable analytics?",
+      "default": true
+    }
+  ]
+}
+```
+
+### Onboarding Step Types
+
+<ParamField path="input" type="object">
+  Text input prompt
+  
+  Properties:
+  - `key` (string) - Identifier for the value
+  - `prompt` (string) - User prompt text
+  - `default` (string, optional) - Default value
+</ParamField>
+
+<ParamField path="secret" type="object">
+  Secure password/token input (stored in keychain via Bun.secrets)
+  
+  Properties:
+  - `key` (string) - Identifier for the secret
+  - `prompt` (string) - User prompt text
+</ParamField>
+
+<ParamField path="confirm" type="object">
+  Yes/no confirmation
+  
+  Properties:
+  - `key` (string) - Identifier for the boolean
+  - `prompt` (string) - User prompt text
+  - `default` (boolean, optional) - Default value
+</ParamField>
+
+## State Storage
+
+Bundle state is stored in:
+
+- **Project metadata**: `~/gitspace/<project>/.bundle-state.json` - Tracks applied configuration
+- **Keychain**: Secrets are stored securely via `Bun.secrets` API
+- **Workspace marker**: `.gitspace.lock` in workspace root
+
+## Change Detection
+
+The `status` command detects:
+
+- **Version changes**: Bundle version updated in `bundle.json`
+- **New onboarding steps**: New inputs/secrets/confirmations added
+- **Removed steps**: Steps removed from bundle
+- **Modified prompts**: Step definitions changed
+
+## Onboarding Re-run Behavior
+
+### Previous Values as Defaults
+
+When refreshing:
+- **Input steps**: Previous value shown as default in prompt
+- **Secret steps**: Prompt shows `[Keep existing]` option
+- **Confirm steps**: Previous boolean value used as default
+
+### Example Prompt Flow
+
+```
+Enter API endpoint URL: (http://localhost:3000) ▌
+```
+
+Pressing Enter accepts the previous value `http://localhost:3000`.
+
+For secrets:
+```
+Enter Stripe API key: (or press Enter to keep existing) ▌
+```
+
+Pressing Enter keeps the existing secret without re-entering.
+
+## Error Handling
+
+<Note>
+  **Common Errors:**
+  
+  - **No bundle found**: Workspace doesn't have `.gitspace/bundle.json`
+  - **Bundle parse error**: Invalid JSON in `bundle.json`
+  - **Workspace not found**: Specified workspace doesn't exist
+  - **Missing required flags**: Must provide both `--project` and `--workspace`
+</Note>
+
+## Use Cases
+
+### After Pulling Bundle Updates
+
+```bash
+# Pull latest changes to bundle.json
+cd ~/gitspace/myapp/workspaces/feature-auth
+git pull
+
+# Check if bundle changed
+gssh workspace bundle status --project myapp --workspace feature-auth
+
+# Refresh configuration if needed
+gssh workspace bundle refresh --project myapp --workspace feature-auth
+```
+
+### Rotating Secrets
+
+```bash
+# Force re-run onboarding to update secrets
+gssh workspace bundle refresh --project myapp --workspace feature-auth --force
+```
+
+Enter new secret values when prompted.
+
+### Debugging Configuration
+
+```bash
+# Check what bundle is active
+gssh workspace bundle status --project myapp --workspace feature-auth
+```
+
+Verify bundle name, version, and source.
+
+## Related Commands
+
+- [`gssh workspace add`](/cli/workspace/add) - Create workspace (runs initial bundle onboarding)
+- [`gssh project add`](/cli/project/add) - Create project with bundle support
+- [`gssh workspace context`](/cli/workspace/context) - Show workspace context
+
+## Implementation Details
+
+- Located in: `src/commands/bundle.ts` as `bundleStatus()` and `bundleRefresh()`
+- Bundle detection: `src/core/bundle.ts` `detectBundleInRepo()`, `loadBundleFromPath()`
+- Change detection: `src/core/bundle-refresh.ts` `detectBundleChanges()`
+- Onboarding: `src/utils/onboarding.ts` `runOnboarding()`
+- State management: `src/core/project-lifecycle.ts` `applyProjectBundleState()`
+
+## Security Considerations
+
+<Warning>
+  **Secret Storage:**
+  
+  - Secrets are stored in system keychain via `Bun.secrets`
+  - Never committed to git
+  - Encrypted at rest
+  - Can be rotated with `--force` refresh
+  
+  **Best Practices:**
+  - Rotate secrets regularly
+  - Use different secrets per workspace if needed
+  - Review bundle.json before running refresh
+  - Don't share workspace directories with sensitive secrets
+</Warning>

@@ -1,0 +1,289 @@
+---
+title: 'Remote Access Overview'
+description: 'Architecture and capabilities of GitSpace remote terminal access'
+icon: 'network-wired'
+---
+
+GitSpace provides secure, end-to-end encrypted remote terminal access to your development machines through a relay architecture. This system enables you to access your workspaces from anywhere while maintaining complete control over your data.
+
+## Core Architecture
+
+```
+┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
+│  Your Machine   │       │  Relay Server   │       │  Remote Client  │
+│                 │       │                 │       │                 │
+│  gssh serve     │◀═════▶│  Routing only   │◀═════▶│ gssh connect    │
+│  (PTY sessions) │ WebSocket │ E2E encrypted │ WebSocket │ or browser    │
+│                 │       │  (can't decrypt)│       │                 │
+└─────────────────┘       └─────────────────┘       └─────────────────┘
+```
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="End-to-End Encryption" icon="lock">
+    All terminal content is encrypted using X3DH handshake with AES-256-GCM.
+    The relay cannot decrypt your terminal sessions.
+  </Card>
+  
+  <Card title="Identity-Based Access" icon="fingerprint">
+    Cryptographic identities (Ed25519/X25519) prove who you are without
+    passwords. Owner-only access model with device certificates.
+  </Card>
+  
+  <Card title="NAT Traversal" icon="globe">
+    Access machines behind firewalls and NAT without port forwarding.
+    The relay server handles connectivity.
+  </Card>
+  
+  <Card title="Persistent Sessions" icon="terminal">
+    Terminal sessions continue running when you disconnect. Reconnect
+    from any device without losing context.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+### 1. Machine Identity
+
+Each machine generates a cryptographic identity locally:
+
+- **Ed25519 signing key**: Proves machine identity via signatures
+- **X25519 key exchange key**: Establishes encryption with clients
+- **Unique machine ID**: Derived from the signing public key
+
+Your identity keypair is stored encrypted in `~/gitspace/.identity/keypair.json`.
+
+### 2. Relay Registration
+
+Machines register with a relay server:
+
+```bash
+gssh machine serve start --relay ws://relay.example.com:4480/ws
+```
+
+<Steps>
+  <Step title="Connect to relay">
+    Machine opens WebSocket connection with `role=machine`
+  </Step>
+  
+  <Step title="Receive challenge">
+    Relay sends a random nonce that must be signed
+  </Step>
+  
+  <Step title="Prove identity">
+    Machine signs the challenge with its Ed25519 private key
+  </Step>
+  
+  <Step title="Registration confirmed">
+    Relay verifies signature and marks machine as online
+  </Step>
+</Steps>
+
+### 3. Client Connection
+
+Clients connect to machines through the relay:
+
+```bash
+gssh client connect <machine-id>
+```
+
+<Steps>
+  <Step title="Client authenticates">
+    Client signs `connect_to_machine` message with device certificate
+  </Step>
+  
+  <Step title="Relay verifies owner identity">
+    Relay checks that client's user root ID matches machine owner
+  </Step>
+  
+  <Step title="X3DH handshake">
+    Client and machine perform 4-phase handshake to derive session keys
+  </Step>
+  
+  <Step title="Encrypted session begins">
+    All terminal I/O flows through relay, encrypted end-to-end
+  </Step>
+</Steps>
+
+### 4. Terminal Sessions
+
+Terminal sessions are managed by tmux-lite on the machine:
+
+- **PTY sessions**: Real shell processes running in pseudo-terminals
+- **xterm-headless**: Tracks terminal state server-side
+- **Multiplexed I/O**: Multiple clients can attach to the same session
+- **Frame protocol**: Binary frames carry PTY data and control messages
+
+See [src/lib/tmux-lite/](https://github.com/gitspace-sh/gitspace/tree/main/src/lib/tmux-lite) for implementation details.
+
+## Security Model
+
+### What the Relay Can See
+
+<Info>
+The relay server can only see routing metadata:
+- Machine identifiers
+- Connection identifiers  
+- Client/machine online status
+- Encrypted message sizes
+
+It **cannot** see:
+- Terminal content (commands, output)
+- Decrypted sync payloads
+- Local secret values
+</Info>
+
+### Cryptographic Primitives
+
+| Purpose | Algorithm | Key Size |
+|---------|-----------|----------|
+| Identity signing | Ed25519 | 256-bit |
+| Key exchange | X25519 (ECDH) | 256-bit |
+| Symmetric encryption | AES-256-GCM | 256-bit |
+| Key derivation | HKDF-SHA256 | 256-bit output |
+| Session nonces | CSPRNG | 256-bit |
+
+Implementation: [src/lib/tmux-lite/crypto/](https://github.com/gitspace-sh/gitspace/tree/main/src/lib/tmux-lite/crypto)
+
+### Threat Model
+
+<AccordionGroup>
+  <Accordion title="Relay Server Compromise">
+    **Threat**: Attacker gains control of relay server
+    
+    **Mitigation**: 
+    - E2E encryption protects terminal content
+    - Relay cannot decrypt session keys (derived via X3DH)
+    - Forward secrecy prevents decryption of past sessions
+    - Device certificates bind access to owner identity
+  </Accordion>
+  
+  <Accordion title="Network Interception">
+    **Threat**: Man-in-the-middle attack on network traffic
+    
+    **Mitigation**:
+    - TLS encrypts WebSocket connections
+    - X3DH provides authentication within encrypted tunnel
+    - Signed pre-keys prevent impersonation
+  </Accordion>
+  
+  <Accordion title="Replay Attacks">
+    **Threat**: Attacker replays captured messages
+    
+    **Mitigation**:
+    - Timestamped signed messages
+    - Challenge-response with random nonces
+    - Session-specific keys from ephemeral keypairs
+  </Accordion>
+</AccordionGroup>
+
+## Access Control
+
+### Owner-Only Model
+
+GitSpace uses an owner-only authorization model:
+
+1. **Owner user root identity**: Canonical user identity (`gssh-user:...`)
+2. **Device certificates**: Bind each device to the owner root
+3. **Runtime authorization**: Relay only allows owner-owned machines
+
+No multi-user grant system is active. All devices recovered with the same owner mnemonic can access the same machines.
+
+### Machine Enrollment
+
+Machines must be enrolled with a relay before they can accept connections:
+
+```bash
+# Create relay-machine invite
+gssh invite relay-machine create \
+  --relay wss://relay.example.com/ws \
+  --machine-signing-key <BASE64_ED25519_PUB> \
+  --machine-key-exchange-key <BASE64_X25519_PUB>
+
+# Enroll machine with invite token
+gssh machine enroll --invite "wss://relay.example.com/ws#<TOKEN>"
+```
+
+See [Machine Enrollment](/remote/identity#machine-enrollment) for details.
+
+## Connection Flows
+
+### gitspace.sh Hosted
+
+<Steps>
+  <Step title="Reserve subdomain">
+    `gssh user host reserve <name>`
+  </Step>
+  
+  <Step title="Start machine daemon">
+    `gssh machine serve start` (auto-detects hosted relay)
+  </Step>
+  
+  <Step title="Open web interface">
+    Navigate to `https://<name>.gitspace.sh`
+  </Step>
+  
+  <Step title="Authenticate with owner identity">
+    Browser client performs X3DH handshake
+  </Step>
+  
+  <Step title="Connect to session">
+    Select workspace and attach to terminal
+  </Step>
+</Steps>
+
+### Self-Hosted Relay
+
+<Steps>
+  <Step title="Start relay server">
+    `gssh relay start --port 4480`
+  </Step>
+  
+  <Step title="Create machine invite">
+    `gssh invite relay-machine create --relay ws://relay:4480/ws ...`
+  </Step>
+  
+  <Step title="Enroll machine">
+    `gssh machine enroll --invite "ws://relay:4480/ws#<TOKEN>"`
+  </Step>
+  
+  <Step title="Start serving">
+    `gssh machine serve start --relay ws://relay:4480/ws`
+  </Step>
+  
+  <Step title="Connect from client">
+    `gssh client connect <machine-id>`
+  </Step>
+</Steps>
+
+## Performance Characteristics
+
+- **Handshake latency**: 2-4 round trips (~100-200ms on good networks)
+- **Data latency**: Relay adds ~10-50ms overhead vs direct connection
+- **Throughput**: Limited by WebSocket buffering (~10 MB/s typical)
+- **CPU overhead**: Encryption/decryption uses ~5% CPU per active session
+
+<Warning>
+For bulk data transfer (git clone, file sync), prefer direct SSH connections when possible. GitSpace remote access is optimized for interactive terminal use.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Identity Management" icon="key" href="/remote/identity">
+    Learn how to generate and manage Ed25519/X25519 keypairs
+  </Card>
+  
+  <Card title="gitspace.sh Hosting" icon="cloud" href="/remote/gitspace-sh">
+    Set up hosted relay with Cloudflare tunnels
+  </Card>
+  
+  <Card title="Self-Hosted Relay" icon="server" href="/remote/self-hosted">
+    Run your own relay server for complete control
+  </Card>
+  
+  <Card title="Security Model" icon="shield" href="/remote/security">
+    Deep dive into cryptography and threat mitigation
+  </Card>
+</CardGroup>

@@ -1,0 +1,667 @@
+---
+title: 'Security Model'
+description: 'Encryption, authentication, and threat mitigation'
+icon: 'shield-halved'
+---
+
+GitSpace's security model is built on cryptographic identities, end-to-end encryption, and a zero-trust relay architecture. This page details the security guarantees, threat model, and implementation specifics.
+
+## Security Principles
+
+<CardGroup cols={2}>
+  <Card title="Zero-Trust Relay" icon="eye-slash">
+    The relay cannot decrypt terminal content or access private keys. It's a blind router that handles connectivity only.
+  </Card>
+  
+  <Card title="End-to-End Encryption" icon="lock">
+    Terminal data is encrypted client-to-machine using X3DH handshake. Session keys never transit the relay.
+  </Card>
+  
+  <Card title="Cryptographic Identity" icon="fingerprint">
+    Ed25519 signatures prove identity without passwords. X25519 provides forward-secret key exchange.
+  </Card>
+  
+  <Card title="Owner-Only Access" icon="user-shield">
+    Only devices with the owner's user root identity can connect. No multi-user grant flows.
+  </Card>
+</CardGroup>
+
+## Cryptographic Primitives
+
+### Algorithms and Key Sizes
+
+| Purpose | Algorithm | Key Size | Library |
+|---------|-----------|----------|----------|
+| Identity signing | **Ed25519** | 256-bit | [@noble/curves](https://github.com/paulmillr/noble-curves) |
+| Key exchange | **X25519** (ECDH) | 256-bit | [@noble/curves](https://github.com/paulmillr/noble-curves) |
+| Symmetric encryption | **AES-256-GCM** | 256-bit | node:crypto |
+| Key derivation | **HKDF-SHA256** | 256-bit output | [@noble/hashes](https://github.com/paulmillr/noble-hashes) |
+| Message authentication | **HMAC-SHA256** | 256-bit | node:crypto |
+| Session nonces | **CSPRNG** | 256-bit | node:crypto.randomBytes |
+
+**Implementation:**
+- [src/lib/tmux-lite/crypto/identity.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/identity.ts) - Ed25519 signing
+- [src/lib/tmux-lite/crypto/keyexchange.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/keyexchange.ts) - X25519 ECDH + HKDF
+- [src/lib/tmux-lite/crypto/secretbox.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/secretbox.ts) - AES-256-GCM encryption
+- [src/lib/tmux-lite/crypto/handshake.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/handshake.ts) - X3DH protocol
+
+### Why These Algorithms?
+
+<AccordionGroup>
+  <Accordion title="Ed25519 (Signatures)">
+    **Properties:**
+    - Fast: ~60,000 signatures/sec on modern CPUs
+    - Small: 32-byte public keys, 64-byte signatures
+    - Secure: ~128-bit security level, resistant to timing attacks
+    - Deterministic: Same message + key = same signature
+
+    **Use in GitSpace:**
+    - Prove machine identity to relay (challenge-response)
+    - Sign client messages (list_machines, connect_to_machine)
+    - Sign device certificates (bind devices to user root)
+    - Verify invite tokens (owner-signed enrollment)
+
+    **Security:** No known attacks against Ed25519. Used by Signal, SSH, TLS 1.3.
+  </Accordion>
+  
+  <Accordion title="X25519 (Key Exchange)">
+    **Properties:**
+    - ECDH on Curve25519
+    - Shared secret from public key exchange
+    - ~128-bit security level
+    - Constant-time operations (resistant to timing attacks)
+
+    **Use in GitSpace:**
+    - X3DH handshake between client and machine
+    - Derive session keys without relay knowing them
+    - Forward secrecy (ephemeral keys per session)
+
+    **Security:** Same curve as Ed25519, proven secure. Used by Signal, WhatsApp, WireGuard.
+  </Accordion>
+  
+  <Accordion title="AES-256-GCM (Encryption)">
+    **Properties:**
+    - AEAD: Authenticated Encryption with Associated Data
+    - 256-bit key, 96-bit nonce, 128-bit auth tag
+    - Hardware acceleration on modern CPUs (AES-NI)
+    - Fast: ~3 GB/s on modern hardware
+
+    **Use in GitSpace:**
+    - Encrypt terminal frames (PTY data, control messages)
+    - Authenticated encryption prevents tampering
+    - Unique nonce per message (no nonce reuse)
+
+    **Security:** No practical attacks on AES-256. GCM mode provides authentication. NIST approved.
+  </Accordion>
+  
+  <Accordion title="HKDF-SHA256 (Key Derivation)">
+    **Properties:**
+    - Extract-then-expand KDF
+    - Derives multiple keys from shared secret
+    - Domain separation via info strings
+    - Based on HMAC-SHA256
+
+    **Use in GitSpace:**
+    - Derive send/receive keys from X3DH shared secret
+    - Domain separation: "spaces-v1-send", "spaces-v1-receive"
+    - Session ID derivation for key rotation
+
+    **Security:** Provably secure if SHA256 is collision-resistant. NIST SP 800-56C compliant.
+  </Accordion>
+</AccordionGroup>
+
+## X3DH Handshake Protocol
+
+GitSpace uses a 4-phase **Extended Triple Diffie-Hellman (X3DH)** handshake to establish encrypted sessions:
+
+```
+Client                                    Machine
+   │                                         │
+   │─────1. ClientHello─────────────────────▶│
+   │   ephemeralKey, clientNonce             │
+   │                                         │
+   │◀────2. ServerHello─────────────────────┤
+   │   identityKey, signedPreKey,            │
+   │   ephemeralKey, serverNonce             │
+   │                                         │
+   │─────3. ClientAuth──────────────────────▶│
+   │   identityKey, identityProof,           │
+   │   identitySignature, deviceCert         │
+   │                                         │
+   │◀────4. ServerAuth──────────────────────┤
+   │   identityProof, authResult             │
+   │                                         │
+   │         [Session keys derived]          │
+   │◀═════E2E Encrypted Session═════════════▶│
+```
+
+### Phase 1: ClientHello
+
+**Client generates:**
+- Ephemeral X25519 keypair (`client_ephemeral`)
+- Random nonce (`client_nonce`, 32 bytes)
+
+**Client sends:**
+```json
+{
+  "version": 1,
+  "ephemeralKey": "<base64>",
+  "clientNonce": "<base64>",
+  "timestamp": 1709568000000
+}
+```
+
+**Security:**
+- Ephemeral key provides forward secrecy
+- Nonce prevents replay attacks
+- Timestamp limits message age (±5 minutes tolerance)
+
+### Phase 2: ServerHello
+
+**Machine generates:**
+- Signed pre-key (`signed_prekey`, signed with identity key)
+- Ephemeral X25519 keypair (`server_ephemeral`)
+- Random nonce (`server_nonce`, 32 bytes)
+
+**Machine sends:**
+```json
+{
+  "version": 1,
+  "identityKey": "<base64-ed25519-pub>",
+  "keyExchangeKey": "<base64-x25519-pub>",
+  "signedPreKey": "<base64-x25519-pub>",
+  "preKeySignature": "<base64-ed25519-sig>",
+  "ephemeralKey": "<base64>",
+  "serverNonce": "<base64>",
+  "timestamp": 1709568001000
+}
+```
+
+**Client verifies:**
+- Pre-key signature is valid (proves machine identity)
+- Timestamp is recent
+- All public keys have correct lengths
+
+### Phase 3: ClientAuth
+
+**Client computes:**
+1. **Triple DH:**
+   - `DH1 = X25519(client_ephemeral, server_signed_prekey)`
+   - `DH2 = X25519(client_ephemeral, server_identity_keyexchange)`
+   - `DH3 = X25519(client_ephemeral, server_ephemeral)`
+
+2. **Session keys:**
+   - `salt = client_nonce || server_nonce`
+   - `master_secret = HKDF-extract([DH1, DH2, DH3], salt, "spaces-v1-master")`
+   - `send_key = HKDF-expand(master_secret, salt, "spaces-v1-send", 32)`
+   - `receive_key = HKDF-expand(master_secret, salt, "spaces-v1-receive", 32)`
+   - `session_id = HKDF-expand(master_secret, salt, "spaces-v1-session-id", 16)`
+
+3. **Identity proof:**
+   - `transcript = client_nonce || server_nonce`
+   - `identity_proof = HMAC-SHA256(send_key, transcript)`
+
+4. **Identity signature:**
+   - `sig_transcript = client_ephemeral || server_ephemeral || client_nonce || server_nonce`
+   - `identity_signature = Ed25519-sign(client_identity_key, sig_transcript)`
+
+**Client sends:**
+```json
+{
+  "version": 1,
+  "identityKey": "<base64-ed25519-pub>",
+  "keyExchangeKey": "<base64-x25519-pub>",
+  "identityProof": "<base64-hmac>",
+  "identitySignature": "<base64-ed25519-sig>",
+  "deviceCertificate": "<json-device-cert>",
+  "authorization": { "type": "access_list" }
+}
+```
+
+**Machine verifies:**
+- Identity signature is valid (client owns signing key)
+- Device certificate is valid and not expired
+- Device certificate binds client to owner user root
+- Identity proof matches expected HMAC
+- Authorization is allowed (owner identity check)
+
+### Phase 4: ServerAuth
+
+**Machine computes:**
+- Same triple DH and session keys (roles swapped)
+- `identity_proof = HMAC-SHA256(send_key, transcript)`
+
+**Machine sends:**
+```json
+{
+  "version": 1,
+  "identityKey": "<base64-ed25519-pub>",
+  "identityProof": "<base64-hmac>",
+  "result": {
+    "type": "accepted",
+    "accessType": "full",
+    "permissions": { "read": true, "write": true, "manage": true }
+  }
+}
+```
+
+**Client verifies:**
+- Identity key matches ServerHello
+- Identity proof matches expected HMAC
+- Authorization result is "accepted"
+
+**Handshake complete! Both parties have:**
+- Identical `send_key` and `receive_key` (swapped)
+- Identical `session_id`
+- Mutual authentication (both proved identity)
+- Forward secrecy (ephemeral keys destroyed after handshake)
+
+### Security Properties
+
+<Info>
+**Perfect Forward Secrecy**: Ephemeral keys are destroyed after handshake. Compromising long-term identity keys does NOT compromise past sessions.
+
+**Mutual Authentication**: Both client and machine prove identity via signatures.
+
+**Replay Protection**: Nonces and timestamps prevent message replay.
+
+**Man-in-the-Middle Protection**: Signed pre-keys prevent impersonation.
+</Info>
+
+Implementation: [src/lib/tmux-lite/crypto/handshake.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/handshake.ts)
+
+## Encrypted Frame Protocol
+
+After X3DH handshake, all terminal data flows in **encrypted frames**:
+
+### Frame Format
+
+```
+┌─────────────────────────────────────────────────┐
+│ Nonce (12 bytes, random)                        │
+├─────────────────────────────────────────────────┤
+│ Ciphertext (variable length)                    │
+│   - Encrypted with AES-256-GCM                  │
+│   - Key: send_key (from X3DH)                   │
+│   - AAD: frame type + sequence number           │
+├─────────────────────────────────────────────────┤
+│ Auth Tag (16 bytes, from GCM)                   │
+└─────────────────────────────────────────────────┘
+```
+
+**Plaintext structure (before encryption):**
+
+```json
+{
+  "type": "pty_data",
+  "sessionId": "abc123",
+  "data": "<base64-terminal-output>"
+}
+```
+
+**Frame types:**
+- `pty_data`: Terminal input/output
+- `pty_resize`: Window size change
+- `pty_signal`: Signal (Ctrl+C, etc.)
+- `control`: Session management (attach, detach)
+
+**Security:**
+- Unique nonce per frame (no nonce reuse)
+- Authenticated encryption (GCM auth tag)
+- Additional authenticated data (AAD) prevents reordering
+- Sequence numbers detect dropped frames
+
+Implementation: [src/lib/tmux-lite/crypto/frames.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/frames.ts)
+
+## Device Certificates
+
+### Certificate Structure
+
+```typescript
+interface DeviceCertificate {
+  userRootId: string;              // Owner user root ID (16 chars)
+  deviceSigningPublicKey: string;  // Device Ed25519 public key (base64)
+  deviceKexPublicKey: string;      // Device X25519 public key (base64)
+  signature: string;               // Ed25519 signature (base64)
+  issuedAt: number;                // Unix timestamp (ms)
+  expiresAt: number;               // Unix timestamp (ms)
+}
+```
+
+### Signing Process
+
+**Certificate creation:**
+
+```typescript
+// 1. Gather certificate fields
+const cert = {
+  userRootId: "YzN5MTIzNDU2Nzg5",
+  deviceSigningPublicKey: Buffer.from(deviceSigningKey).toString('base64'),
+  deviceKexPublicKey: Buffer.from(deviceKexKey).toString('base64'),
+  issuedAt: Date.now(),
+  expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000), // 1 year
+};
+
+// 2. Create signing payload (canonical JSON)
+const payload = JSON.stringify({
+  userRootId: cert.userRootId,
+  deviceSigningPublicKey: cert.deviceSigningPublicKey,
+  deviceKexPublicKey: cert.deviceKexPublicKey,
+  issuedAt: cert.issuedAt,
+  expiresAt: cert.expiresAt,
+});
+
+// 3. Sign with user root private key
+const signature = ed25519.sign(
+  new TextEncoder().encode(payload),
+  userRootPrivateKey
+);
+
+cert.signature = Buffer.from(signature).toString('base64');
+```
+
+### Verification Process
+
+**Certificate verification:**
+
+```typescript
+// 1. Check expiration
+if (Date.now() > cert.expiresAt) {
+  throw new Error('Certificate expired');
+}
+
+// 2. Recreate signing payload
+const payload = JSON.stringify({
+  userRootId: cert.userRootId,
+  deviceSigningPublicKey: cert.deviceSigningPublicKey,
+  deviceKexPublicKey: cert.deviceKexPublicKey,
+  issuedAt: cert.issuedAt,
+  expiresAt: cert.expiresAt,
+});
+
+// 3. Derive user root public key from ID
+const userRootPublicKey = getUserRootPublicKeyById(cert.userRootId);
+
+// 4. Verify signature
+const isValid = ed25519.verify(
+  Buffer.from(cert.signature, 'base64'),
+  new TextEncoder().encode(payload),
+  userRootPublicKey
+);
+
+if (!isValid) {
+  throw new Error('Invalid certificate signature');
+}
+```
+
+Implementation: [src/lib/tmux-lite/crypto/device-cert.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/device-cert.ts)
+
+## Threat Model
+
+### Threat: Relay Compromise
+
+**Scenario**: Attacker gains control of relay server.
+
+**What attacker CAN do:**
+- See machine IDs and connection metadata
+- See which clients connect to which machines
+- Deny service (drop connections)
+- Observe message sizes and timing
+
+**What attacker CANNOT do:**
+- Decrypt terminal content (E2E encrypted)
+- Recover session keys (never transmitted)
+- Impersonate machines (no private keys on relay)
+- Decrypt sync payloads (owner-encrypted)
+
+**Mitigation:**
+- E2E encryption protects all terminal data
+- X3DH derives keys without relay involvement
+- Signed pre-keys prevent relay impersonation
+- Device certificates bind access to owner identity
+
+### Threat: Network Interception
+
+**Scenario**: Man-in-the-middle attack on network traffic.
+
+**Mitigation:**
+- **TLS**: All WebSocket connections use WSS (TLS 1.2+)
+- **X3DH**: Authentication within encrypted tunnel
+- **Signed pre-keys**: Prevent impersonation even if TLS compromised
+- **Certificate pinning**: (Future) Pin relay public key
+
+**Residual risk:** TLS CA compromise could enable MITM, but X3DH still prevents impersonation.
+
+### Threat: Replay Attacks
+
+**Scenario**: Attacker captures and replays messages.
+
+**Mitigation:**
+- **Timestamped messages**: All signed messages include timestamp (±5 min tolerance)
+- **Challenge-response**: Relay challenges machines with random nonces
+- **Session nonces**: X3DH includes client/server nonces
+- **Ephemeral keys**: Forward secrecy prevents session replay
+
+**Residual risk:** Very short window (5 minutes) for timestamp replay, but would fail authentication checks.
+
+### Threat: Stolen Device
+
+**Scenario**: Attacker steals device with GitSpace identity.
+
+**Mitigation:**
+- **Password encryption**: Device identity is password-encrypted
+- **Full-disk encryption**: Recommended for all devices
+- **Remote revocation**: Revoke device certificate on owner device
+- **Mnemonic recovery**: Generate new identity on new device
+
+**Residual risk:** If attacker has device password, they can use identity until revoked.
+
+### Threat: Compromised Mnemonic
+
+**Scenario**: Attacker obtains 24-word recovery phrase.
+
+**Mitigation:**
+- **Immediate rotation**: Generate new user root identity
+- **Re-issue certificates**: Sign new device certificates
+- **Revoke old identity**: (Future) Add to revocation list
+
+**Residual risk:** HIGH - Attacker can impersonate owner until rotation complete.
+
+<Warning>
+**Critical**: Protect your 24-word mnemonic like a password manager master password. If compromised, an attacker can impersonate you on all machines.
+</Warning>
+
+### Threat: Timing Attacks
+
+**Scenario**: Attacker measures execution time to infer secrets.
+
+**Mitigation:**
+- **Constant-time crypto**: Ed25519 and X25519 use constant-time operations
+- **HMAC comparison**: Constant-time comparison for identity proofs
+- **Public key validation**: Constant-time checks for low-order points
+
+**Libraries used:**
+- [@noble/curves](https://github.com/paulmillr/noble-curves): Audited, constant-time Ed25519/X25519
+- node:crypto: AES-GCM uses hardware AES-NI (constant-time)
+
+## Security Audits
+
+<Info>
+GitSpace has not yet undergone a formal security audit. This is planned for Q3 2026.
+
+Cryptographic libraries used:
+- **@noble/curves**: [Audited by Cure53](https://github.com/paulmillr/noble-curves#security) (2023)
+- **@noble/hashes**: [Audited by Cure53](https://github.com/paulmillr/noble-hashes#security) (2022)
+- **Node.js crypto**: FIPS 140-2 validated OpenSSL
+</Info>
+
+**Planned audit scope:**
+- X3DH handshake implementation
+- Frame encryption/decryption
+- Device certificate validation
+- Invite token generation/verification
+- Access control enforcement
+
+## Compliance
+
+### Standards
+
+| Standard | Status | Notes |
+|----------|--------|-------|
+| NIST SP 800-56A | ✅ Compliant | X25519 ECDH |
+| NIST SP 800-56C | ✅ Compliant | HKDF-SHA256 |
+| NIST SP 800-38D | ✅ Compliant | AES-256-GCM |
+| FIPS 186-5 | ✅ Compliant | Ed25519 signatures |
+| RFC 7748 | ✅ Compliant | X25519, Ed25519 |
+| RFC 5869 | ✅ Compliant | HKDF |
+
+### Data Residency
+
+**gitspace.sh hosted:**
+- Relay servers: US (Cloudflare global network)
+- API servers: US (Vercel)
+- User data: Encrypted at rest, owner-only decryption
+
+**Self-hosted:**
+- Full control over data location
+- Can run in air-gapped environments
+- No external dependencies (except TLS certificates)
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Mnemonic Storage">
+    ✅ **DO:**
+    - Write down on paper and store in safe
+    - Use metal backup (fire/water resistant)
+    - Split across multiple secure locations
+    - Test recovery on new device periodically
+
+    ❌ **DON'T:**
+    - Store digitally (email, cloud, screenshots)
+    - Share with anyone (GitSpace support will NEVER ask)
+    - Store with device password
+    - Rely on single backup copy
+  </Accordion>
+  
+  <Accordion title="Device Security">
+    ✅ **DO:**
+    - Enable full-disk encryption
+    - Use strong, unique device passwords
+    - Enable auto-lock after inactivity
+    - Keep OS and GitSpace up to date
+
+    ❌ **DON'T:**
+    - Reuse passwords across devices
+    - Store passwords in plaintext
+    - Disable lock screen
+    - Ignore security updates
+  </Accordion>
+  
+  <Accordion title="Network Security">
+    ✅ **DO:**
+    - Always use WSS (TLS) for relay connections
+    - Verify relay fingerprint on first connect
+    - Use trusted networks when possible
+    - Enable firewall on all devices
+
+    ❌ **DON'T:**
+    - Use WS (unencrypted) for production
+    - Disable TLS certificate validation
+    - Connect from untrusted public WiFi without VPN
+    - Expose relay port directly to internet
+  </Accordion>
+</AccordionGroup>
+
+## Incident Response
+
+### If Device is Lost/Stolen
+
+<Steps>
+  <Step title="Immediately revoke device">
+    On another device with owner identity:
+    ```bash
+    gssh user devices list
+    gssh user devices revoke <device-id>
+    ```
+  </Step>
+  
+  <Step title="Rotate device keys">
+    (Future) Generate new device certificate:
+    ```bash
+    gssh user devices rotate <device-id>
+    ```
+  </Step>
+  
+  <Step title="Monitor access logs">
+    Check for unauthorized connections:
+    ```bash
+    gssh machine serve status
+    gssh relay machines list
+    ```
+  </Step>
+  
+  <Step title="If mnemonic was on device">
+    Immediately rotate user root identity (when implemented)
+  </Step>
+</Steps>
+
+### If Mnemonic is Compromised
+
+<Steps>
+  <Step title="Generate new user root identity">
+    ```bash
+    gssh user identity init --force
+    ```
+    **Save new 24-word mnemonic securely**
+  </Step>
+  
+  <Step title="Re-issue all device certificates">
+    On each device:
+    ```bash
+    gssh user devices re-certify
+    ```
+  </Step>
+  
+  <Step title="Update relay binding">
+    ```bash
+    gssh relay rebind --new-owner <user-root-id>
+    ```
+  </Step>
+  
+  <Step title="Notify all devices">
+    Alert all team members to update their identities
+  </Step>
+</Steps>
+
+## Reporting Vulnerabilities
+
+Found a security issue? Please report responsibly:
+
+- **Email**: security@gitspace.sh
+- **PGP Key**: [Download](https://gitspace.sh/.well-known/pgp-key.txt)
+- **Scope**: Any security vulnerability in GitSpace CLI, relay, or web client
+
+**Please include:**
+- Description of vulnerability
+- Steps to reproduce
+- Potential impact
+- Suggested fix (if applicable)
+
+**We commit to:**
+- Acknowledge within 24 hours
+- Provide fix timeline within 72 hours
+- Credit in security advisory (unless you prefer anonymity)
+- Bug bounty for qualifying vulnerabilities
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Identity Management" icon="key" href="/remote/identity">
+    Deep dive into Ed25519/X25519 keypair management
+  </Card>
+  
+  <Card title="Self-Hosted Relay" icon="server" href="/remote/self-hosted">
+    Run your own relay with custom security policies
+  </Card>
+</CardGroup>

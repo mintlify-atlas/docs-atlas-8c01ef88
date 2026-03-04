@@ -1,0 +1,841 @@
+---
+title: 'Creating Repo Config Bundles'
+description: 'Package onboarding flows and scripts for seamless team setup'
+icon: 'box'
+---
+
+# Creating Repo Config Bundles
+
+Repo config bundles allow repository owners to package onboarding steps, scripts, and configuration for their team. When someone adds a project with a bundle, they're guided through setup and have automation ready to go.
+
+## What is a Bundle?
+
+A bundle is a directory (typically `.gitspace/`) containing:
+
+1. **`bundle.json`**: Onboarding steps and metadata
+2. **`scripts/`**: Lifecycle automation scripts
+
+```
+.gitspace/
+├── bundle.json           # Bundle manifest
+└── scripts/
+    ├── setup/            # Run on workspace creation
+    │   ├── 01-install-deps.sh
+    │   └── 02-build.sh
+    ├── select/           # Run on terminal attach
+    │   └── 01-status.sh
+    └── remove/           # Run before workspace deletion
+        └── 01-cleanup.sh
+```
+
+<Note>
+Bundles are **version-controlled with your repository**. Each workspace gets the bundle from its branch, so different branches can have different automation.
+</Note>
+
+## Bundle Manifest Structure
+
+### Basic Example
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "my-app-bundle",
+  "description": "Setup bundle for my-app",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to My App",
+      "description": "Let's get your development environment set up!"
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js Installed",
+      "description": "Node.js 18+ is required",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Enter your development API key",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Which team are you on?",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    }
+  ]
+}
+```
+
+### Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | string | Must be `"1.0"` |
+| `name` | string | Unique bundle identifier |
+| `description` | string | Human-readable description (optional) |
+| `onboarding` | array | List of onboarding steps (optional) |
+
+## Onboarding Step Types
+
+### Info Step
+
+Display information to the user:
+
+```json
+{
+  "id": "welcome",
+  "type": "info",
+  "title": "Welcome",
+  "description": "This bundle will configure your workspace with:
+• Database connection
+• API credentials
+• Build tools"
+}
+```
+
+**Fields:**
+- `id` (required): Unique identifier for this step
+- `type`: `"info"`
+- `title` (required): Step title
+- `description` (required): Multi-line information
+
+**Behavior:**
+- Displayed as a modal
+- User presses Enter to continue
+- No value is stored
+
+### Confirm Step
+
+Verify a requirement is met (optionally check for a command):
+
+```json
+{
+  "id": "docker",
+  "type": "confirm",
+  "title": "Docker",
+  "description": "Docker is required for running services locally",
+  "checkCommand": "docker",
+  "installUrl": "https://docs.docker.com/get-docker/"
+}
+```
+
+**Fields:**
+- `id` (required): Unique identifier
+- `type`: `"confirm"`
+- `title` (required): Requirement title
+- `description` (required): What needs to be verified
+- `checkCommand` (optional): Command to check (tests if it exists in PATH)
+- `installUrl` (optional): URL shown if check fails
+
+**Behavior:**
+- If `checkCommand` is provided:
+  - GitSpace checks if the command exists
+  - Shows ✓ (found) or ✗ (missing)
+  - User confirms they've met the requirement
+- No value is stored (no `configKey`)
+
+### Secret Step
+
+Collect sensitive values (masked input, stored in OS keychain):
+
+```json
+{
+  "id": "github-token",
+  "type": "secret",
+  "title": "GitHub Personal Access Token",
+  "description": "Create a token at https://github.com/settings/tokens
+Required scopes: repo, workflow",
+  "configKey": "githubToken"
+}
+```
+
+**Fields:**
+- `id` (required): Unique identifier
+- `type`: `"secret"`
+- `title` (required): What value is being collected
+- `description` (required): Instructions
+- `configKey` (required): Key name for script access
+
+**Behavior:**
+- Input is masked (shows `***`)
+- Value stored in OS keychain (not in config files)
+- Available to scripts as `$githubToken` and `$GITHUB_TOKEN`
+
+<Warning>
+Secrets are stored securely in your OS keychain:
+- **macOS**: Keychain Access
+- **Linux**: libsecret (GNOME Keyring, KWallet)
+
+Never logged or written to disk.
+</Warning>
+
+### Input Step
+
+Collect plain-text values (stored in project config):
+
+```json
+{
+  "id": "aws-region",
+  "type": "input",
+  "title": "AWS Region",
+  "description": "Which AWS region do you want to use?",
+  "configKey": "awsRegion",
+  "defaultValue": "us-east-1"
+}
+```
+
+**Fields:**
+- `id` (required): Unique identifier
+- `type`: `"input"`
+- `title` (required): What value is being collected
+- `description` (required): Prompt text
+- `configKey` (required): Key name for script access
+- `defaultValue` (optional): Pre-filled value
+
+**Behavior:**
+- Input is visible
+- Value stored in `~/gitspace/<project>/.config.json` under `bundleValues`
+- Available to scripts as `$awsRegion` and `$AWS_REGION`
+
+## Config Key Naming
+
+### How Keys Become Environment Variables
+
+GitSpace exports bundle values in two formats:
+
+<Steps>
+  <Step title="Exact Key">
+    The `configKey` is exported exactly as written:
+    
+    ```json
+    "configKey": "apiKey"
+    ```
+    
+    Available as: `$apiKey`
+  </Step>
+
+  <Step title="Normalized Alias">
+    A normalized version is also exported:
+    
+    ```json
+    "configKey": "apiKey"
+    ```
+    
+    Also available as: `$API_KEY` (uppercase snake-case)
+  </Step>
+</Steps>
+
+### Naming Rules
+
+<Tabs>
+  <Tab title="Valid Keys">
+    ✅ **These work well:**
+    
+    ```json
+    "configKey": "apiKey"          → $apiKey, $API_KEY
+    "configKey": "API_KEY"         → $API_KEY
+    "configKey": "teamName"        → $teamName, $TEAM_NAME
+    "configKey": "aws-region"      → $aws-region, $AWS_REGION
+    "configKey": "database.host"   → $database.host, $DATABASE_HOST
+    ```
+  </Tab>
+  <Tab title="Invalid Keys">
+    ❌ **These will cause errors:**
+    
+    ```json
+    "configKey": "123key"          → Normalized: $123KEY (invalid shell var)
+    "configKey": "-apiKey"         → Normalized: $_API_KEY (starts with dash)
+    "configKey": "api key"         → Normalized: $API_KEY (has space)
+    ```
+    
+    **Error Message:**
+    ```
+    Shell variable names must match: [A-Za-z_][A-Za-z0-9_]*
+    Fix: rename the configKey so its normalized alias starts with a letter or underscore.
+    ```
+  </Tab>
+</Tabs>
+
+### Collision Detection
+
+GitSpace prevents ambiguous environment variables:
+
+```json
+// ❌ BAD: Both normalize to $API_KEY
+{
+  "onboarding": [
+    {
+      "id": "api-key-1",
+      "type": "secret",
+      "configKey": "apiKey"  // → $API_KEY
+    },
+    {
+      "id": "api-key-2",
+      "type": "secret",
+      "configKey": "api_key" // → $API_KEY (collision!)
+    }
+  ]
+}
+```
+
+**Error Message:**
+```
+Bundle configKey alias collision
+
+Multiple config keys normalize to the same script env alias: API_KEY
+- step "api-key-1" configKey "apiKey"
+- step "api-key-2" configKey "api_key"
+
+Scripts would read an ambiguous value from $API_KEY.
+Fix: rename one of the conflicting configKey values so each exported env var is unique.
+```
+
+## Complete Bundle Examples
+
+### Node.js Application
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "nodejs-app-bundle",
+  "description": "Setup for Node.js development",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to the Project",
+      "description": "This setup will:\n• Install dependencies\n• Configure environment\n• Set up git hooks"
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js 18+",
+      "description": "Node.js 18 or higher is required",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "pnpm",
+      "type": "confirm",
+      "title": "pnpm Package Manager",
+      "description": "We use pnpm instead of npm",
+      "checkCommand": "pnpm",
+      "installUrl": "https://pnpm.io/installation"
+    },
+    {
+      "id": "database-url",
+      "type": "secret",
+      "title": "Database Connection String",
+      "description": "PostgreSQL connection string\nExample: postgresql://user:pass@localhost:5432/mydb",
+      "configKey": "databaseUrl"
+    },
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Get your API key from https://app.example.com/settings/api",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "environment",
+      "type": "input",
+      "title": "Environment",
+      "description": "Which environment? (development, staging)",
+      "configKey": "environment",
+      "defaultValue": "development"
+    }
+  ]
+}
+```
+
+**Corresponding Scripts:**
+
+```bash .gitspace/scripts/setup/01-install.sh
+#!/bin/bash
+set -e
+
+echo "📦 Installing dependencies..."
+pnpm install
+
+echo "🔨 Building project..."
+pnpm run build
+
+echo "✅ Dependencies installed"
+```
+
+```bash .gitspace/scripts/setup/02-env.sh
+#!/bin/bash
+set -e
+
+echo "⚙️  Configuring environment..."
+
+cat > .env <<EOF
+DATABASE_URL=$databaseUrl
+API_KEY=$apiKey
+NODE_ENV=$environment
+EOF
+
+echo "✅ Environment configured"
+```
+
+### Python Application
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "python-app-bundle",
+  "description": "Python development environment",
+  "onboarding": [
+    {
+      "id": "python",
+      "type": "confirm",
+      "title": "Python 3.11+",
+      "description": "Python 3.11 or higher required",
+      "checkCommand": "python3",
+      "installUrl": "https://www.python.org/downloads/"
+    },
+    {
+      "id": "poetry",
+      "type": "confirm",
+      "title": "Poetry Package Manager",
+      "description": "We use Poetry for dependency management",
+      "checkCommand": "poetry",
+      "installUrl": "https://python-poetry.org/docs/#installation"
+    },
+    {
+      "id": "aws-profile",
+      "type": "input",
+      "title": "AWS Profile",
+      "description": "AWS CLI profile name",
+      "configKey": "awsProfile",
+      "defaultValue": "default"
+    },
+    {
+      "id": "aws-region",
+      "type": "input",
+      "title": "AWS Region",
+      "description": "Primary AWS region",
+      "configKey": "awsRegion",
+      "defaultValue": "us-east-1"
+    }
+  ]
+}
+```
+
+### Docker-Based Development
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "docker-dev-bundle",
+  "description": "Docker-based microservices",
+  "onboarding": [
+    {
+      "id": "docker",
+      "type": "confirm",
+      "title": "Docker",
+      "description": "Docker Desktop or Docker Engine required",
+      "checkCommand": "docker",
+      "installUrl": "https://docs.docker.com/get-docker/"
+    },
+    {
+      "id": "docker-compose",
+      "type": "confirm",
+      "title": "Docker Compose",
+      "description": "Docker Compose for multi-container apps",
+      "checkCommand": "docker-compose",
+      "installUrl": "https://docs.docker.com/compose/install/"
+    },
+    {
+      "id": "registry-username",
+      "type": "input",
+      "title": "Container Registry Username",
+      "description": "DockerHub or private registry username",
+      "configKey": "registryUsername"
+    },
+    {
+      "id": "registry-token",
+      "type": "secret",
+      "title": "Container Registry Token",
+      "description": "Access token for pushing images",
+      "configKey": "registryToken"
+    }
+  ]
+}
+```
+
+## Bundle Sources
+
+Bundles can be loaded from three locations:
+
+<Tabs>
+  <Tab title="In-Repo (Automatic)">
+    Place bundle in your repository:
+    
+    ```bash
+    # Recommended location
+    .gitspace/
+    ├── bundle.json
+    └── scripts/
+        ├── setup/
+        ├── select/
+        └── remove/
+    ```
+    
+    **Auto-detection:**
+    - GitSpace looks for `.gitspace/bundle.json` after cloning
+    - Runs onboarding automatically
+    - Scripts are version-controlled with each branch
+    
+    **Usage:**
+    ```bash
+    gssh project add
+    # Select your repo
+    # Bundle is detected and onboarding starts
+    ```
+  </Tab>
+  
+  <Tab title="Local Path">
+    Use a local bundle directory:
+    
+    ```bash
+    gssh project add --bundle-path /path/to/bundle/
+    ```
+    
+    **Use cases:**
+    - Testing bundles before committing
+    - Shared team bundles (network drive)
+    - Development/debugging
+    
+    **Structure:**
+    ```
+    /path/to/bundle/
+    ├── bundle.json
+    └── scripts/
+    ```
+  </Tab>
+  
+  <Tab title="Remote URL">
+    Download bundle from a URL:
+    
+    ```bash
+    gssh project add --bundle-url https://example.com/bundle.zip
+    ```
+    
+    **Requirements:**
+    - Must be a `.zip` archive
+    - Must contain `bundle.json` at root or in a single subdirectory
+    - Can include `scripts/` directory
+    
+    **Use cases:**
+    - Centralized bundle distribution
+    - Cross-repository bundles
+    - Private bundle server
+  </Tab>
+</Tabs>
+
+## Bundle Validation
+
+GitSpace validates bundles when they're loaded:
+
+### Common Validation Errors
+
+<Accordion title="Duplicate Step IDs">
+  **Error:**
+  ```
+  Duplicate onboarding step id: api-key
+  ```
+  
+  **Fix:**
+  Each step must have a unique `id`:
+  
+  ```json
+  // ❌ BAD
+  {"id": "api-key", ...},
+  {"id": "api-key", ...}  // Duplicate!
+  
+  // ✅ GOOD
+  {"id": "api-key-dev", ...},
+  {"id": "api-key-prod", ...}
+  ```
+</Accordion>
+
+<Accordion title="Missing configKey">
+  **Error:**
+  ```
+  Step "database" of type "secret" must have a configKey
+  ```
+  
+  **Fix:**
+  `input` and `secret` steps require `configKey`:
+  
+  ```json
+  // ❌ BAD
+  {
+    "id": "database",
+    "type": "secret",
+    "title": "Database Password"
+    // Missing configKey!
+  }
+  
+  // ✅ GOOD
+  {
+    "id": "database",
+    "type": "secret",
+    "title": "Database Password",
+    "configKey": "databasePassword"
+  }
+  ```
+</Accordion>
+
+<Accordion title="Invalid Shell Variable">
+  **Error:**
+  ```
+  Shell variable names must match: [A-Za-z_][A-Za-z0-9_]*
+  Fix: rename the configKey so its normalized alias starts with a letter or underscore.
+  ```
+  
+  **Fix:**
+  Ensure normalized keys are valid shell variables:
+  
+  ```json
+  // ❌ BAD
+  "configKey": "123-api-key"  // Normalizes to $123_API_KEY (invalid)
+  
+  // ✅ GOOD
+  "configKey": "apiKey123"    // Normalizes to $API_KEY_123 (valid)
+  ```
+</Accordion>
+
+## Testing Your Bundle
+
+<Steps>
+  <Step title="Create Test Repository">
+    Make a test repo or use an existing one:
+    
+    ```bash
+    mkdir -p /tmp/test-bundle-repo
+    cd /tmp/test-bundle-repo
+    git init
+    ```
+  </Step>
+
+  <Step title="Add Bundle">
+    Create `.gitspace/bundle.json` and scripts:
+    
+    ```bash
+    mkdir -p .gitspace/scripts/{setup,select,remove}
+    
+    # Create bundle.json
+    cat > .gitspace/bundle.json <<'EOF'
+    {
+      "version": "1.0",
+      "name": "test-bundle",
+      "onboarding": [
+        {
+          "id": "test",
+          "type": "input",
+          "title": "Test Value",
+          "description": "Enter a test value",
+          "configKey": "testValue",
+          "defaultValue": "hello"
+        }
+      ]
+    }
+    EOF
+    
+    # Create test script
+    cat > .gitspace/scripts/setup/01-test.sh <<'EOF'
+    #!/bin/bash
+    set -e
+    echo "Test value: $testValue"
+    echo "Normalized: $TEST_VALUE"
+    EOF
+    
+    chmod +x .gitspace/scripts/setup/01-test.sh
+    ```
+  </Step>
+
+  <Step title="Commit Bundle">
+    ```bash
+    git add .gitspace/
+    git commit -m "Add bundle"
+    ```
+  </Step>
+
+  <Step title="Test with GitSpace">
+    ```bash
+    # Push to GitHub or use local path
+    gssh project add --bundle-path /tmp/test-bundle-repo/.gitspace/
+    
+    # Follow onboarding
+    # Verify bundle values are passed to scripts
+    ```
+  </Step>
+</Steps>
+
+## Best Practices
+
+### Keep Onboarding Short
+
+<Tabs>
+  <Tab title="Do">
+    ✅ 3-5 steps for most projects
+    
+    ```json
+    "onboarding": [
+      {"type": "info", ...},       // Welcome
+      {"type": "confirm", ...},    // Check Node.js
+      {"type": "secret", ...},     // API key
+      {"type": "input", ...}       // Environment
+    ]
+    ```
+  </Tab>
+  <Tab title="Don't">
+    ❌ Too many steps overwhelm users
+    
+    ```json
+    "onboarding": [
+      // 15 steps... users will quit!
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+### Provide Clear Descriptions
+
+```json
+// ✅ GOOD: Clear instructions
+{
+  "id": "api-key",
+  "type": "secret",
+  "title": "GitHub Personal Access Token",
+  "description": "Create a token at: https://github.com/settings/tokens/new
+
+Required scopes:
+• repo (full control)
+• workflow (update workflows)",
+  "configKey": "githubToken"
+}
+
+// ❌ BAD: Vague
+{
+  "id": "token",
+  "type": "secret",
+  "title": "Token",
+  "description": "Enter token",
+  "configKey": "token"
+}
+```
+
+### Use Sensible Defaults
+
+```json
+// ✅ GOOD: Defaults for common values
+{
+  "id": "region",
+  "type": "input",
+  "title": "AWS Region",
+  "description": "Primary AWS region",
+  "configKey": "awsRegion",
+  "defaultValue": "us-east-1"  // Most common
+}
+```
+
+### Document Your Bundle
+
+Include a README in your `.gitspace/` directory:
+
+```markdown .gitspace/README.md
+# Development Environment Setup
+
+This bundle configures:
+
+- Node.js dependencies
+- Environment variables
+- Git hooks
+- Database connection
+
+## Manual Setup
+
+If you're not using GitSpace:
+
+1. Copy `.env.example` to `.env`
+2. Fill in required values
+3. Run `npm install`
+4. Run `npm run setup`
+
+## Bundle Values
+
+| Key | Description | Example |
+|-----|-------------|---------|
+| `apiKey` | API key for external service | `sk_live_...` |
+| `databaseUrl` | PostgreSQL connection | `postgresql://...` |
+```
+
+## Sharing Bundles
+
+### Option 1: In-Repository (Recommended)
+
+Commit to your main branch:
+
+```bash
+git add .gitspace/
+git commit -m "Add GitSpace bundle for team onboarding"
+git push
+```
+
+Team members get it automatically:
+
+```bash
+gssh project add
+# Select repo
+# Bundle onboarding starts
+```
+
+### Option 2: Separate Bundle Repository
+
+Create a dedicated bundle repo:
+
+```bash
+mkdir my-app-bundle
+cd my-app-bundle
+
+# Create bundle.json and scripts/
+git init
+git add .
+git commit -m "Initial bundle"
+git push
+```
+
+Share the URL:
+
+```bash
+gssh project add --bundle-url https://github.com/myorg/my-app-bundle/archive/main.zip
+```
+
+### Option 3: Company Bundle Server
+
+Host bundles on an internal server:
+
+```
+https://bundles.company.com/
+├── nodejs-app.zip
+├── python-app.zip
+└── docker-app.zip
+```
+
+Employees use:
+
+```bash
+gssh project add --bundle-url https://bundles.company.com/nodejs-app.zip
+```

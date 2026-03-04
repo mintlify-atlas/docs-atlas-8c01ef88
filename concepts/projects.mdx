@@ -1,0 +1,305 @@
+---
+title: 'Projects'
+description: 'Top-level containers for GitHub repositories in GitSpace'
+---
+
+## Overview
+
+Projects are the top-level organizational unit in GitSpace. Each project represents a single GitHub repository and contains all workspaces (git worktrees) for that repository.
+
+## Project Structure
+
+When you add a project, GitSpace creates the following directory structure:
+
+```
+~/gitspace/<project-name>/
+├── .config.json          # Project configuration
+├── base/                 # Base repository clone
+└── workspaces/           # Git worktrees for parallel development
+    ├── feature-auth/
+    ├── bugfix-login/
+    └── main/
+```
+
+### Directory Locations
+
+| Directory | Path | Purpose |
+|-----------|------|----------|
+| Project root | `~/gitspace/<project-name>/` | Container for all project data |
+| Base clone | `~/gitspace/<project-name>/base/` | Main repository clone (used for creating worktrees) |
+| Workspaces | `~/gitspace/<project-name>/workspaces/` | All git worktrees for parallel development |
+| Config | `~/gitspace/<project-name>/.config.json` | Project-specific settings |
+
+<Note>
+These paths are defined in `src/core/config.ts:50-73` using helper functions like `getProjectDir()`, `getProjectBaseDir()`, and `getProjectWorkspacesDir()`.
+</Note>
+
+## Project Configuration
+
+Each project has a configuration file at `~/gitspace/<project-name>/.config.json`:
+
+```json
+{
+  "name": "my-app",
+  "repository": "myorg/my-app",
+  "baseBranch": "main",
+  "createdAt": "2025-01-01T00:00:00Z",
+  "lastAccessed": "2025-01-15T12:00:00Z",
+  "linearTeams": ["ENG", "PROD"],
+  "bundleValues": {
+    "teamName": "engineering",
+    "region": "us-west-2"
+  },
+  "bundleSecretKeys": ["apiKey", "dbPassword"],
+  "events": {
+    "enabled": true,
+    "mode": "prefix",
+    "prefix": "@event"
+  }
+}
+```
+
+### Configuration Fields
+
+<Accordion title="Core Fields">
+  **Required fields** for every project:
+
+  - `name` - Project identifier (matches directory name)
+  - `repository` - GitHub repository in `owner/repo` format
+  - `baseBranch` - Default branch for creating new workspaces
+  - `createdAt` - ISO timestamp when project was created
+  - `lastAccessed` - ISO timestamp of last project interaction
+</Accordion>
+
+<Accordion title="Linear Integration">
+  **Optional fields** for Linear integration:
+
+  - `linearTeams` - Array of Linear team keys (e.g., `["ENG", "DESIGN"]`)
+  - Linear teams configured at user level are inherited by all projects
+  - Override per-project to limit which teams can be selected for workspace creation
+</Accordion>
+
+<Accordion title="Bundle Configuration">
+  **Bundle-related fields** (see [Bundles](/concepts/bundles) for details):
+
+  - `bundleValues` - Non-sensitive config values collected during onboarding
+  - `bundleSecretKeys` - Keys of secrets stored in OS keychain (values NOT in config)
+  - `bundleWorkspaceState` - Per-workspace bundle metadata
+  - `bundleConfirmHistory` - History of confirm/check step results
+</Accordion>
+
+<Accordion title="Events Configuration">
+  **Wide events settings** for structured logging:
+
+  - `events.enabled` - Enable wide event collection (default: `true`)
+  - `events.mode` - Ingestion mode: `"prefix"` or `"json"`
+  - `events.prefix` - Event line prefix (default: `"@event"`)
+  - See `src/types/config.ts:100-149` for full schema
+</Accordion>
+
+## Creating Projects
+
+### From the TUI
+
+Press `n` while in the projects panel:
+
+1. Select a GitHub repository from the list
+2. GitSpace clones the repository to `~/gitspace/<project-name>/base`
+3. Detects the default branch automatically
+4. Runs bundle onboarding if a `.gitspace/bundle.json` is present
+5. Creates project configuration
+
+### From the CLI
+
+```bash
+# Basic project creation
+gssh project add
+
+# With bundle from URL
+gssh project add --bundle-url https://example.com/bundle.zip
+
+# With local bundle
+gssh project add --bundle-path /path/to/bundle/
+
+# Skip bundle detection
+gssh project add --skip-bundle
+
+# Filter to specific organization
+gssh project add --org mycompany
+```
+
+<Note>
+The `gssh project add` command is implemented in `src/commands/add.ts`. It uses `gh repo list` via the GitHub CLI to fetch available repositories.
+</Note>
+
+## Project Operations
+
+### List All Projects
+
+```bash
+# Human-readable format
+gssh project list
+
+# JSON output
+gssh project list --json
+
+# Verbose details
+gssh project list --verbose
+```
+
+**Output includes:**
+- Project name
+- GitHub repository
+- Number of workspaces
+- Current project indicator (*)
+
+### Switch Current Project
+
+```bash
+# Interactive selection
+gssh project switch
+
+# Direct switch
+gssh project switch my-app
+```
+
+The current project is stored in the global config at `~/gitspace/.config.json`:
+
+```json
+{
+  "currentProject": "my-app",
+  "projectsDir": "/Users/username/gitspace",
+  "defaultBaseBranch": "main"
+}
+```
+
+### Remove a Project
+
+```bash
+# Interactive removal
+gssh project remove
+
+# Direct removal
+gssh project remove my-app
+
+# Skip confirmation
+gssh project remove my-app --force
+```
+
+<Warning>
+Removing a project deletes:
+- All workspaces and their worktrees
+- The base repository clone
+- Project configuration
+- All terminal sessions in those workspaces
+
+This operation **cannot be undone**. Ensure you've committed and pushed all changes.
+</Warning>
+
+## Base Repository
+
+The **base repository** is the main clone used for creating git worktrees:
+
+```bash
+~/gitspace/my-app/base/
+```
+
+### Purpose
+
+- Source for creating new worktrees via `git worktree add`
+- Stays on the base branch (typically `main`)
+- All workspaces share this base `.git` directory
+- Fetches from remote are done here
+
+### Operations
+
+<Info>
+**Fetch updates:**
+```bash
+cd ~/gitspace/my-app/base
+git fetch origin
+```
+
+**Check remote branches:**
+```bash
+cd ~/gitspace/my-app/base
+git branch -r
+```
+</Info>
+
+## Project Discovery
+
+GitSpace discovers projects by scanning `~/gitspace/` for directories containing `.config.json`:
+
+```typescript
+// src/core/config.ts:277-306
+export function getAllProjectNames(): string[] {
+  const spacesDir = getSpacesDir()
+  const entries = readdirSync(spacesDir)
+  
+  return entries.filter((entry: string) => {
+    const projectDir = join(spacesDir, entry)
+    const configPath = join(projectDir, '.config.json')
+    return (
+      statSync(projectDir).isDirectory() &&
+      existsSync(configPath) &&
+      entry !== 'app' // Exclude special directories
+    )
+  })
+}
+```
+
+## Global Configuration
+
+Global settings affecting all projects are stored in `~/gitspace/.config.json`:
+
+```json
+{
+  "currentProject": "my-app",
+  "projectsDir": "/Users/username/gitspace",
+  "defaultBaseBranch": "main",
+  "staleDays": 30,
+  "linearTeams": [
+    {
+      "id": "team_abc123",
+      "key": "ENG",
+      "name": "Engineering"
+    }
+  ],
+  "linearDefaultTeam": "ENG",
+  "notifications": {
+    "enabled": true,
+    "minCommandDurationMs": 10000
+  }
+}
+```
+
+### Global Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `currentProject` | `null` | Currently active project |
+| `projectsDir` | `~/gitspace` | Base directory for all projects |
+| `defaultBaseBranch` | `main` | Default branch for new projects |
+| `staleDays` | `30` | Days before workspace considered stale |
+| `linearTeams` | `[]` | User's Linear teams (from OAuth) |
+| `linearDefaultTeam` | `null` | Default team for workspace creation |
+| `notifications` | `{...}` | Notification preferences |
+
+<Note>
+Global config is managed by functions in `src/core/config.ts:78-161` including `readGlobalConfig()`, `writeGlobalConfig()`, and `updateGlobalConfig()`.
+</Note>
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Workspaces" icon="folder-tree" href="/concepts/workspaces">
+    Learn about git worktrees for parallel development
+  </Card>
+  <Card title="Bundles" icon="box" href="/concepts/bundles">
+    Understand repo config bundles for team onboarding
+  </Card>
+  <Card title="Scripts" icon="code" href="/concepts/scripts">
+    Convention-based custom scripts for automation
+  </Card>
+</CardGroup>

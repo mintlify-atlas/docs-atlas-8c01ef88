@@ -1,0 +1,420 @@
+---
+title: "tmux-lite Commands"
+description: "Manage terminal sessions with tmux-lite daemon"
+---
+
+## Overview
+
+tmux-lite provides a set of commands for managing persistent terminal sessions. All commands are prefixed with `gssh machine tmux`.
+
+## Daemon Management
+
+### Start Server
+
+```bash
+gssh machine tmux start
+```
+
+Starts the tmux-lite server daemon in the background.
+
+**Behavior:**
+- If already running, displays PID and exits
+- Cleans up stale PID files automatically
+- Spawns detached background process
+- Creates Unix socket at `/tmp/tmux-lite.sock`
+- Writes PID to `/tmp/tmux-lite.pid`
+
+**Example Output:**
+```
+Starting tmux-lite server...
+tmux-lite server started (pid 12345)
+```
+
+<Note>
+  The server starts automatically when you create or attach to a session, so manual start is usually unnecessary.
+</Note>
+
+---
+
+### Stop Server
+
+```bash
+gssh machine tmux stop [--force]
+```
+
+Stops the tmux-lite server daemon.
+
+<ParamField path="--force" type="flag">
+  Force stop even if active sessions exist
+</ParamField>
+
+**Behavior:**
+- Lists active sessions before stopping
+- Requires `--force` if sessions are running
+- Terminates all sessions when stopped
+- Removes PID file and socket
+
+**Example Output:**
+```
+Warning: 2 active session(s) will be terminated
+Sessions:
+  ● ws-123: workspace (3m)
+  ● dev-456: development (1h)
+
+Use --force to stop anyway
+```
+
+**Force stop:**
+```bash
+gssh machine tmux stop --force
+```
+
+---
+
+### Show Status
+
+```bash
+gssh machine tmux status
+```
+
+Displays current server status with session statistics.
+
+**Example Output (running):**
+```
+┌─ tmux-lite ─────────────────────────────┐
+│ Status:   ● running (pid 12345)         │
+│ Version:  1.0.0                         │
+│ Socket:   /tmp/tmux-lite.sock           │
+│ Sessions: 3 total (2 attached)          │
+│ Uptime:   2h 15m                        │
+└─────────────────────────────────────────┘
+```
+
+**Example Output (not running):**
+```
+┌─ tmux-lite ─────────────────────────────┐
+│ Status:   ○ not running                 │
+│                                         │
+│ Run: gssh machine tmux start            │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## Session Management
+
+### List Sessions
+
+```bash
+gssh machine tmux list
+```
+
+Lists all active terminal sessions.
+
+**Example Output:**
+```
+Sessions:
+  ● ws-abc: workspace (5m) [vim]
+      /home/user/gitspace/myproject/workspaces/feature-branch
+  ○ dev-xyz: development (2h) (exited 0)
+      /home/user/gitspace/myproject/workspaces/main
+```
+
+**Legend:**
+- `●` = Client attached
+- `○` = Detached (no client)
+- `[process]` = Current process title
+- `(exited N)` = Session terminated with exit code N
+- Age shown in seconds (s), minutes (m), or hours (h)
+
+---
+
+### Create Session
+
+```bash
+gssh machine tmux new [name]
+```
+
+Creates a new session and attaches immediately.
+
+<ParamField path="name" type="string" optional>
+  Session name (auto-generated if omitted)
+</ParamField>
+
+**Behavior:**
+- Starts server if not running
+- Spawns login shell in current directory
+- Sets `TMUX_LITE` environment variable
+- Takes over terminal (raw mode)
+- Returns when session exits or user detaches
+
+**Example:**
+```bash
+gssh machine tmux new feature-work
+```
+
+**Output:**
+```
+Created session: feature-work (id: feature-work-1a2b3c)
+Shift+Esc to detach
+
+# Your shell session starts here
+```
+
+<Warning>
+  Nested sessions are not allowed. You'll get an error if you run this inside an existing tmux-lite session.
+</Warning>
+
+**Detaching:**
+Press `Shift+Esc` to detach without ending the session.
+
+---
+
+### Attach to Session
+
+```bash
+gssh machine tmux attach <id> [--force]
+```
+
+Attaches to an existing session.
+
+<ParamField path="id" type="string" required>
+  Session ID or name (from `tmux list`)
+</ParamField>
+
+<ParamField path="--force" type="flag">
+  Take over if another client is attached
+</ParamField>
+
+**Behavior:**
+- Restores full terminal state (including scrollback)
+- Sends resize event to match current terminal size
+- Blocks other clients unless `--force` is used
+- Exits when session ends or user detaches
+
+**Example:**
+```bash
+gssh machine tmux attach feature-work
+```
+
+**Output:**
+```
+Attaching to: feature-work (id: feature-work-1a2b3c)
+Shift+Esc to detach
+
+# Terminal state restored
+```
+
+**If already attached:**
+```
+Session feature-work is attached elsewhere
+Use --force to take over
+```
+
+**Force takeover:**
+```bash
+gssh machine tmux attach feature-work --force
+```
+
+<Note>
+  The previous client will be kicked and receive a "kicked" message.
+</Note>
+
+---
+
+### Kill Session
+
+```bash
+gssh machine tmux kill <id>
+```
+
+Terminates a session immediately.
+
+<ParamField path="id" type="string" required>
+  Session ID or name
+</ParamField>
+
+**Behavior:**
+- Sends SIGTERM to the shell process
+- Closes PTY and session socket
+- Removes session from server state
+- Safe to use on exited sessions
+
+**Example:**
+```bash
+gssh machine tmux kill feature-work
+```
+
+**Output:**
+```
+Killed session: feature-work (id: feature-work-1a2b3c)
+```
+
+<Warning>
+  This will terminate any processes running in the session. Use `Ctrl+D` or `exit` from within the session for graceful shutdown.
+</Warning>
+
+---
+
+## Keyboard Shortcuts
+
+### Detach from Session
+
+**Key:** `Shift+Esc`
+
+**Sequences recognized:**
+- `ESC [ 27;2u` (CSI u mode)
+- `ESC [ 27;2;27 ~` (xterm)
+
+**Behavior:**
+- Sends detach control message
+- Restores terminal to normal mode
+- Session continues running in background
+- Can reattach later with `gssh machine tmux attach`
+
+---
+
+## Exit Codes
+
+| Code | Meaning |
+|------|----------|
+| 0 | Clean detach or normal exit |
+| 1 | Error (session not found, server error, etc.) |
+| N | Session exited with code N (when attached) |
+
+---
+
+## Common Workflows
+
+### Start a persistent workspace session
+
+```bash
+# Create session in workspace directory
+cd ~/gitspace/myproject/workspaces/feature-branch
+gssh machine tmux new feature-work
+
+# Run your work...
+npm run dev
+
+# Detach with Shift+Esc when done
+# Session keeps running
+```
+
+### Reattach later
+
+```bash
+# List sessions
+gssh machine tmux list
+
+# Attach to previous session
+gssh machine tmux attach feature-work
+```
+
+### Clean up finished sessions
+
+```bash
+# List all sessions (including exited)
+gssh machine tmux list
+
+# Kill exited sessions
+gssh machine tmux kill feature-work
+gssh machine tmux kill old-session
+```
+
+### Check daemon health
+
+```bash
+# Show status
+gssh machine tmux status
+
+# Restart daemon if needed
+gssh machine tmux stop --force
+gssh machine tmux start
+```
+
+---
+
+## Environment Variables (Inside Session)
+
+When attached to a tmux-lite session, these variables are set:
+
+<ParamField path="TMUX_LITE" type="string">
+  Session ID (e.g., `feature-work-1a2b3c`)
+</ParamField>
+
+<ParamField path="TERM" type="string">
+  Set to `xterm-256color` for full color support
+</ParamField>
+
+**Detecting if inside tmux-lite:**
+```bash
+if [ -n "$TMUX_LITE" ]; then
+  echo "Inside tmux-lite session: $TMUX_LITE"
+fi
+```
+
+---
+
+## Troubleshooting
+
+### Stale PID file
+
+If the server crashed, you may see:
+
+```
+tmux-lite server not running
+(cleaned up stale PID file)
+```
+
+This is automatic cleanup. Just run `gssh machine tmux start` to restart.
+
+### Permission denied
+
+Socket permissions are user-only. If you see permission errors:
+
+```bash
+# Check socket ownership
+ls -l /tmp/tmux-lite.sock
+
+# If owned by wrong user, stop and restart
+gssh machine tmux stop --force
+gssh machine tmux start
+```
+
+### Can't detach (Shift+Esc not working)
+
+Ensure your terminal supports the CSI u mode or xterm sequences:
+
+```bash
+# Test in session:
+printf '\x1b[?1u'  # Enable CSI u mode
+# Then try Shift+Esc
+```
+
+Alternatively, kill the session from another terminal:
+```bash
+gssh machine tmux kill <session-id>
+```
+
+### Session not updating terminal size
+
+The server automatically sends resize events. If terminal size is wrong:
+
+```bash
+# Detach and reattach
+# Or manually resize:
+kill -WINCH $$  # Inside session
+```
+
+---
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="tmux-lite Overview" icon="book" href="/cli/tmux/overview">
+    Architecture and protocol details
+  </Card>
+  <Card title="Status Command" icon="chart-line" href="/cli/status">
+    Unified daemon status (includes tmux-lite)
+  </Card>
+</CardGroup>

@@ -1,0 +1,456 @@
+---
+title: 'Workspaces'
+description: 'Git worktrees for parallel branch development in GitSpace'
+---
+
+## Overview
+
+Workspaces in GitSpace are **git worktrees** that allow you to work on multiple branches simultaneously without switching contexts or stashing changes. Each workspace is an isolated working directory with its own branch.
+
+## What are Git Worktrees?
+
+Git worktrees enable multiple working directories for a single repository:
+
+```bash
+# Traditional git (one working directory)
+git checkout main        # switches entire directory
+git checkout feature-a   # loses context, requires stash
+
+# Git worktrees (multiple working directories)
+cd ~/gitspace/my-app/workspaces/main/      # main branch
+cd ~/gitspace/my-app/workspaces/feature-a/ # feature-a branch
+```
+
+**Benefits:**
+- No context switching or stashing
+- Run tests on `main` while developing on a feature branch
+- Compare implementations side-by-side
+- Each workspace has its own terminal session
+
+## Workspace Structure
+
+```
+~/gitspace/my-app/workspaces/feature-auth/
+├── src/                     # Your code
+├── .git                     # Symlink to base repo .git
+├── .gitspace/               # Bundle config and scripts
+│   ├── bundle.json
+│   └── scripts/
+│       ├── setup/           # Run on setup state change
+│       ├── select/          # Run on terminal attach
+│       └── remove/          # Run before deletion
+├── .prompt/                 # Linear issue details (if applicable)
+│   └── issue.md
+└── gitspace.lock            # Setup completion marker
+```
+
+### Key Files
+
+| File/Directory | Purpose |
+|----------------|----------|
+| `.git` | Symlink to `~/gitspace/<project>/base/.git` (shared git directory) |
+| `.gitspace/` | Bundle configuration and custom scripts (version-controlled) |
+| `.prompt/issue.md` | Linear issue markdown (created when workspace is from Linear issue) |
+| `gitspace.lock` | Marker file indicating setup scripts have completed |
+
+<Note>
+The workspace structure is managed by `src/core/git.ts` (worktree operations) and `src/core/workspace.ts` (workspace lifecycle).
+</Note>
+
+## Creating Workspaces
+
+### From the TUI
+
+Press `n` while in the workspaces panel:
+
+1. **From scratch:** Enter a workspace name
+2. **From Linear issue:** Select an issue from your Linear team
+3. GitSpace creates a worktree and branch
+4. Runs setup scripts if configured
+5. Opens an interactive terminal session
+
+### From the CLI
+
+```bash
+# Create workspace from current project
+gssh workspace add feature-auth --project my-app
+
+# Different branch name from workspace name
+gssh workspace add auth --project my-app --branch feature/authentication
+
+# Create from specific branch (not base)
+gssh workspace add hotfix --project my-app --from release/v1.0
+
+# Skip setup scripts
+gssh workspace add debug --project my-app --no-setup
+```
+
+### From Linear Issues
+
+If Linear integration is configured:
+
+```bash
+gssh workspace add --project my-app
+```
+
+1. Shows Linear issues assigned to you
+2. Select an issue (e.g., `ENG-123: Add user authentication`)
+3. Creates workspace named from issue identifier: `eng-123`
+4. Saves issue details to `.prompt/issue.md`
+5. Automatically updates issue state to "In Progress"
+
+<Info>
+Linear integration is implemented in `src/core/linear.ts` using the `@linear/sdk` package. Issue markdown is generated with attachments and metadata.
+</Info>
+
+## Workspace Lifecycle
+
+### 1. Creation
+
+```typescript
+// src/core/git.ts:createWorktree()
+// Creates git worktree and checks out branch
+await execAsync(
+  `git worktree add ${workspacePath} -b ${branchName} ${fromBranch}`
+)
+```
+
+### 2. Setup Phase
+
+Setup scripts run when:
+- Workspace is first created
+- Bundle configuration changes
+- Bundle values change
+
+```bash
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/setup/
+├── 01-install-deps.sh
+├── 02-build.sh
+└── 03-copy-env.sh
+```
+
+See [Scripts](/concepts/scripts) for details.
+
+### 3. Active Development
+
+Each terminal attach runs select scripts:
+
+```bash
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/select/
+├── 01-git-fetch.sh
+└── 02-show-status.sh
+```
+
+### 4. Removal
+
+Before deletion, remove scripts run for cleanup:
+
+```bash
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/remove/
+└── 01-cleanup-cache.sh
+```
+
+## Workspace Info
+
+GitSpace tracks detailed workspace status:
+
+```typescript
+// src/types/workspace.ts:8-25
+export interface WorktreeInfo {
+  name: string              // Workspace directory name
+  path: string              // Absolute path
+  branch: string            // Current git branch
+  ahead: number             // Commits ahead of base
+  behind: number            // Commits behind base
+  uncommittedChanges: number // Dirty files count
+  lastCommit: string        // Last commit message
+  lastCommitDate: Date      // Last commit timestamp
+}
+```
+
+### Get Workspace Info
+
+```bash
+# List all workspaces
+gssh workspace list --project my-app
+
+# JSON output
+gssh workspace list --project my-app --json
+
+# Show workspace context
+gssh workspace context --project my-app --workspace feature-auth
+```
+
+**Example output:**
+
+```
+Workspace: feature-auth
+Branch: feature/authentication
+Ahead: 3 commits
+Behind: 1 commit
+Uncommitted: 5 files
+Last commit: Add login endpoint (2 hours ago)
+```
+
+## Terminal Sessions
+
+Each workspace can have multiple terminal sessions managed by `tmux-lite`:
+
+```bash
+# Create new session in workspace
+gssh machine tmux new
+
+# List sessions
+gssh machine tmux list
+
+# Attach to session
+gssh machine tmux attach <session-id>
+
+# Kill session
+gssh machine tmux kill <session-id>
+```
+
+<Note>
+Session management is implemented in `src/lib/tmux-lite/server.ts` using `@xterm/headless` for terminal state tracking.
+</Note>
+
+## Workspace Session Mode
+
+When you open a workspace terminal, GitSpace injects a `space` shell function:
+
+```bash
+# Inside a workspace session, use 'space' instead of 'gssh'
+space context --json
+space review hunks src/app.ts --format json
+space review add-hunk src/app.ts --index 1 --approve
+```
+
+**Restrictions:**
+- `gssh` commands are blocked (prevents cross-workspace mistakes)
+- `gssh machine tmux ...` is blocked (use TUI for session management)
+- `space` automatically targets current project and workspace
+
+<Warning>
+These restrictions prevent accidentally running commands on the wrong workspace when you have multiple terminals open.
+</Warning>
+
+## Branch Management
+
+### Remote Branch Detection
+
+GitSpace checks if a branch exists on remote:
+
+```typescript
+// src/core/git.ts:102-115
+export async function remoteBranchExists(
+  repoPath: string,
+  branch: string
+): Promise<boolean> {
+  const { stdout } = await execAsync(
+    `git ls-remote --heads origin ${branch}`,
+    { cwd: repoPath }
+  )
+  return stdout.trim().length > 0
+}
+```
+
+If the branch exists remotely, GitSpace checks it out. Otherwise, it creates a new local branch.
+
+### Branch Deletion
+
+When removing a workspace:
+
+```bash
+# Delete workspace and branch
+gssh workspace remove feature-auth --project my-app
+
+# Keep branch when removing workspace
+gssh workspace remove feature-auth --project my-app --keep-branch
+```
+
+## Workspace State Tracking
+
+### Setup Lock File
+
+The `gitspace.lock` file indicates setup completion:
+
+```bash
+~/gitspace/my-app/workspaces/feature-auth/gitspace.lock
+```
+
+**Created by:** `src/utils/workspace-state.ts:markWorkspaceSetupComplete()`
+
+**Checked by:** `src/utils/workspace-state.ts:isWorkspaceSetupComplete()`
+
+If this file is missing, setup scripts will run again on next terminal attach.
+
+### Bundle State
+
+Per-workspace bundle metadata is stored in project config:
+
+```json
+{
+  "bundleWorkspaceState": {
+    "feature-auth": {
+      "scope": "feature-auth",
+      "bundleHash": "abc123def456",
+      "requiredInputKeys": ["teamName", "region"],
+      "requiredSecretKeys": ["apiKey"],
+      "confirmFingerprints": ["node-check-xyz"],
+      "updatedAt": "2025-01-15T12:00:00Z"
+    }
+  }
+}
+```
+
+This allows GitSpace to detect when bundle configuration changes and re-run setup.
+
+<Info>
+Bundle state tracking is implemented in `src/types/config.ts:186-199` and managed by `src/core/bundle-refresh.ts`.
+</Info>
+
+## Removing Workspaces
+
+### CLI Removal
+
+```bash
+# Interactive selection
+gssh workspace remove --project my-app
+
+# Direct removal
+gssh workspace remove feature-auth --project my-app
+
+# Force removal (skip confirmation)
+gssh workspace remove feature-auth --project my-app --force
+
+# Keep git branch
+gssh workspace remove feature-auth --project my-app --keep-branch
+```
+
+### Removal Process
+
+1. **Kill terminal sessions** running in workspace
+2. **Run remove scripts** from `.gitspace/scripts/remove/`
+3. **Remove git worktree** via `git worktree remove`
+4. **Delete local branch** (unless `--keep-branch`)
+5. **Clean up workspace directory**
+
+<Warning>
+**Data Loss Prevention:**
+
+GitSpace will **not** remove a workspace with uncommitted changes unless you use `--force`. Always commit or stash your work first.
+</Warning>
+
+## Working with Workspaces
+
+### Example Workflow
+
+```bash
+# 1. Create workspace from Linear issue
+gssh workspace add --project my-app
+# Select: ENG-123: Add user authentication
+
+# 2. GitSpace creates:
+#    - Workspace: ~/gitspace/my-app/workspaces/eng-123/
+#    - Branch: eng-123
+#    - Issue details: .prompt/issue.md
+
+# 3. Setup scripts run automatically:
+#    - Install dependencies
+#    - Build project
+#    - Copy environment config
+
+# 4. Interactive terminal opens in workspace
+cd ~/gitspace/my-app/workspaces/eng-123
+npm start
+
+# 5. Develop feature...
+vim src/auth/login.ts
+git add src/auth/login.ts
+git commit -m "Add login endpoint"
+
+# 6. Push and create PR
+git push -u origin eng-123
+gh pr create
+
+# 7. When done, remove workspace
+gssh workspace remove eng-123 --project my-app
+```
+
+### Parallel Development
+
+```bash
+# Terminal 1: Main branch (running tests)
+cd ~/gitspace/my-app/workspaces/main
+npm test --watch
+
+# Terminal 2: Feature branch (development)
+cd ~/gitspace/my-app/workspaces/feature-auth
+npm run dev
+
+# Terminal 3: Hotfix branch (urgent fix)
+cd ~/gitspace/my-app/workspaces/hotfix-security
+vim src/security/validator.ts
+```
+
+All three workspaces are active simultaneously with no context switching!
+
+## Advanced Features
+
+### Custom Base Branch
+
+Create workspace from a different base branch:
+
+```bash
+# Create from release branch instead of main
+gssh workspace add hotfix-v1 --project my-app --from release/v1.0
+```
+
+### Workspace Context
+
+Get structured workspace information:
+
+```bash
+# JSON output for scripting
+gssh workspace context --project my-app --workspace feature-auth --json
+```
+
+```json
+{
+  "workspace": "feature-auth",
+  "project": "my-app",
+  "repository": "myorg/my-app",
+  "branch": "feature/authentication",
+  "path": "/Users/me/gitspace/my-app/workspaces/feature-auth",
+  "ahead": 3,
+  "behind": 1,
+  "uncommittedChanges": 5
+}
+```
+
+### Stale Workspace Detection
+
+Workspaces are considered stale after `staleDays` (default: 30):
+
+```bash
+# Global config
+{
+  "staleDays": 30
+}
+```
+
+The TUI shows stale workspaces with a warning indicator.
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Top-level containers for GitHub repositories
+  </Card>
+  <Card title="Scripts" icon="code" href="/concepts/scripts">
+    Convention-based automation with setup/select/remove phases
+  </Card>
+  <Card title="Bundles" icon="box" href="/concepts/bundles">
+    Repo config bundles for team onboarding
+  </Card>
+</CardGroup>

@@ -1,0 +1,264 @@
+---
+title: "gssh machine serve"
+description: "Manage the remote access daemon that accepts encrypted connections"
+---
+
+## Overview
+
+The `gssh machine serve` command group manages the daemon that enables remote terminal access to your machine. The daemon:
+
+- Connects to a relay server (auto-discovered or explicit)
+- Accepts end-to-end encrypted connections from authorized clients
+- Spawns and manages PTY terminal sessions
+- Optionally hosts process ports via Cloudflare Tunnels (with gitspace.sh)
+
+<Note>
+  The serve daemon requires a machine identity. Initialize one with `gssh user identity init` before starting.
+</Note>
+
+## Commands
+
+### `gssh machine serve start`
+
+Start the remote access daemon.
+
+<CodeGroup>
+```bash Background (default)
+gssh machine serve start
+```
+
+```bash Foreground
+gssh machine serve start --foreground
+```
+
+```bash With explicit relay
+gssh machine serve start --relay ws://relay.example.com:4480/ws
+```
+
+```bash With unlock token
+gssh machine serve start --unlock-token <token> --workspace-id <id> --enrollment-token <token> --relay <url>
+```
+</CodeGroup>
+
+#### Options
+
+<ParamField path="--relay" type="string">
+  Relay URL to connect to. If omitted, auto-discovers from:
+  - Local relay at `ws://127.0.0.1:4480/ws` (if running)
+  - gitspace.sh account relay (if authenticated)
+  
+  Prompts for selection if multiple relays are available.
+</ParamField>
+
+<ParamField path="--relay-pubkey" type="string">
+  Base64-encoded relay public key for explicit trust. Skips interactive trust prompt.
+</ParamField>
+
+<ParamField path="--bootstrap-token" type="string">
+  One-time bootstrap token for cloud machine registration.
+</ParamField>
+
+<ParamField path="--enrollment-token" type="string">
+  One-time relay-machine invite token for machine registration. Created with `gssh invite relay-machine create`.
+</ParamField>
+
+<ParamField path="--unlock-token" type="string">
+  One-time token to request unlock grant from relay. Requires `--workspace-id` and `--enrollment-token`.
+</ParamField>
+
+<ParamField path="--workspace-id" type="string">
+  Cloud workspace ID for unlock-token flow.
+</ParamField>
+
+<ParamField path="--password-stdin" type="boolean">
+  Read identity password from stdin instead of interactive prompt. Useful for automation.
+</ParamField>
+
+<ParamField path="--foreground" type="boolean">
+  Run in foreground instead of daemonizing. Useful for debugging or systemd services.
+</ParamField>
+
+<ParamField path="--ignore-keychain-and-skip-secrets" type="boolean">
+  Skip keychain preload and secret-dependent scripts. Useful for headless environments.
+</ParamField>
+
+#### Relay Discovery
+
+<Steps>
+  <Step title="Check for local relay">
+    Attempts to connect to `ws://127.0.0.1:4480/ws` (auto-trusts localhost).
+  </Step>
+  
+  <Step title="Check gitspace.sh account">
+    If authenticated (`gssh user auth login`), uses reserved subdomain relay.
+  </Step>
+  
+  <Step title="Prompt or error">
+    If multiple relays found and TTY available, prompts for selection. Otherwise errors with `--relay` required.
+  </Step>
+</Steps>
+
+#### Relay Trust Verification
+
+On first connection to a relay:
+
+1. **Localhost**: Auto-trusted
+2. **Explicit `--relay-pubkey`**: Validates and trusts if match
+3. **Remote relay**: Prompts for trust confirmation with fingerprint display
+
+<Warning>
+  If a relay's public key changes, the command will abort with a security warning. Remove the old entry from `~/.gitspace/.identity/trusted-relays.json` if this is expected.
+</Warning>
+
+#### Process Hosting (gitspace.sh)
+
+If hosting is configured (`gssh user host reserve <subdomain>`), the daemon automatically:
+
+- Starts a Cloudflare Tunnel for `<subdomain>.serve.gitspace.sh`
+- Scans active tmux-lite sessions for process definitions
+- Exposes process ports as subdomains (e.g., `<workspace>-<process>-<port>.<subdomain>.serve.gitspace.sh`)
+- Refreshes routes every 5 seconds
+
+<Note>
+  Process hosting requires `cloudflared` to be installed and a valid serve tunnel token.
+</Note>
+
+#### Daemon Files
+
+| File | Location | Purpose |
+|------|----------|----------|
+| PID file | `~/.gitspace/.serve/serve.pid` | Process ID |
+| Status socket | `~/.gitspace/.serve/serve.sock` | Unix socket for status queries |
+| Log file | `~/.gitspace/.serve/serve.log` | Daemon output (background mode) |
+| Tunnel config | `~/.gitspace/.serve/serve-tunnel.yml` | Cloudflared ingress config |
+
+---
+
+### `gssh machine serve stop`
+
+Stop the remote access daemon.
+
+```bash
+gssh machine serve stop
+```
+
+<Steps>
+  <Step title="Graceful shutdown">
+    Sends shutdown command via status socket.
+  </Step>
+  
+  <Step title="SIGTERM">
+    If socket fails, sends SIGTERM to PID.
+  </Step>
+  
+  <Step title="SIGKILL">
+    If SIGTERM fails, force-kills with SIGKILL.
+  </Step>
+</Steps>
+
+---
+
+### `gssh machine serve status`
+
+Display daemon status and connection information.
+
+```bash
+gssh machine serve status
+```
+
+#### Output Example
+
+```
+┌─ serve daemon ───────────────────────────┐
+│ Status:   ● running (pid 12345)          │
+│ Version:  1.0.0                          │
+│ Relay:    wss://relay.gitspace.sh/ws     │
+│           connected                       │
+│ Clients:  2 active                       │
+│ Uptime:   1h 23m                         │
+│ Hosting:  ● example.gitspace.sh          │
+└──────────────────────────────────────────┘
+```
+
+#### Status Fields
+
+- **Status**: Running (green ●) or not running (gray ○)
+- **Relay**: Connection URL and status (connected/reconnecting/disconnected)
+- **Clients**: Number of active authenticated sessions
+- **Uptime**: Time since daemon started
+- **Hosting**: gitspace.sh tunnel status (if configured)
+
+---
+
+## Examples
+
+### Standard Setup with Local Relay
+
+<Steps>
+  <Step title="Start local relay">
+    ```bash
+    gssh relay start
+    ```
+  </Step>
+  
+  <Step title="Start serve daemon">
+    ```bash
+    gssh machine serve start
+    # Auto-discovers and uses local relay
+    ```
+  </Step>
+  
+  <Step title="Check status">
+    ```bash
+    gssh machine serve status
+    ```
+  </Step>
+</Steps>
+
+### Setup with gitspace.sh Hosting
+
+<Steps>
+  <Step title="Authenticate">
+    ```bash
+    gssh user auth login
+    ```
+  </Step>
+  
+  <Step title="Reserve subdomain">
+    ```bash
+    gssh user host reserve myteam
+    ```
+  </Step>
+  
+  <Step title="Start serve daemon">
+    ```bash
+    gssh machine serve start
+    # Auto-discovers myteam.gitspace.sh relay
+    # Starts tunnel for myteam.serve.gitspace.sh
+    ```
+  </Step>
+</Steps>
+
+### Headless Machine with Unlock Token
+
+```bash
+gssh machine serve start \
+  --unlock-token <token> \
+  --workspace-id <id> \
+  --enrollment-token <enrollment-token> \
+  --relay wss://relay.example.com/ws \
+  --ignore-keychain-and-skip-secrets
+```
+
+<Note>
+  Unlock mode fetches the machine identity from the relay using the unlock token, bypassing password prompt.
+</Note>
+
+---
+
+## Related Commands
+
+- [`gssh machine enroll`](/cli/machine/enroll) - Enroll machine with relay invite
+- [`gssh client connect`](/cli/client/connect) - Connect to this machine
+- [`gssh relay start`](/cli/relay/start) - Start a local relay server
+- [`gssh user host reserve`](/cli/host/reserve) - Reserve gitspace.sh subdomain

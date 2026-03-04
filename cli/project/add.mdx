@@ -1,0 +1,169 @@
+---
+title: gssh project add
+description: Add a new project from GitHub to GitSpace
+---
+
+Add a new project to GitSpace by cloning a GitHub repository and creating the project structure.
+
+## Usage
+
+```bash
+gssh project add [options]
+```
+
+## Description
+
+The `project add` command creates a new GitSpace project from a GitHub repository. It supports interactive repository selection via GitHub CLI or manual repository URL entry. The command:
+
+- Prompts you to select a repository (from GitHub or manual URL)
+- Clones the repository to `~/gitspace/<project-name>/`
+- Detects the default branch automatically
+- Optionally loads and runs onboarding from a project bundle
+- Sets the new project as the current project
+
+## Options
+
+<ParamField path="--no-clone" type="boolean" default="false">
+  Create project structure without cloning the repository. Useful for existing local repositories.
+</ParamField>
+
+<ParamField path="--org" type="string">
+  Filter repositories to a specific GitHub organization when using the GitHub repository picker.
+</ParamField>
+
+<ParamField path="--linear-key" type="string">
+  Provide Linear API key via command-line flag instead of interactive prompt during bundle onboarding.
+</ParamField>
+
+<ParamField path="--bundle-url" type="string">
+  Load project bundle from a remote URL (zip archive). Bundles contain project templates, scripts, and onboarding workflows.
+</ParamField>
+
+<ParamField path="--bundle-path" type="string">
+  Load project bundle from a local directory path instead of detecting it in the repository.
+</ParamField>
+
+<ParamField path="--skip-bundle" type="boolean" default="false">
+  Skip bundle detection and onboarding entirely. Use this to avoid running setup scripts.
+</ParamField>
+
+## Examples
+
+### Interactive project addition
+
+```bash
+gssh project add
+```
+
+This launches an interactive flow where you can:
+1. Choose between "Enter git remote URL" or "Choose GitHub repository"
+2. Select a repository from your GitHub account
+3. Automatically clone and configure the project
+
+### Add project from specific organization
+
+```bash
+gssh project add --org mycompany
+```
+
+Filters the GitHub repository picker to only show repositories from the `mycompany` organization.
+
+### Add project without cloning
+
+```bash
+gssh project add --no-clone
+```
+
+Creates the project configuration without cloning the repository. Useful if you already have the repository cloned locally at `~/gitspace/<project-name>/`.
+
+### Add project with remote bundle
+
+```bash
+gssh project add --bundle-url https://example.com/my-template.zip
+```
+
+Loads and applies a project bundle from a remote URL, running any onboarding steps defined in the bundle.
+
+### Skip bundle onboarding
+
+```bash
+gssh project add --skip-bundle
+```
+
+Adds the project without detecting or running any bundle onboarding steps, even if a bundle exists in the repository.
+
+## Interactive Flow
+
+When run without arguments, the command provides an interactive experience:
+
+<CodeGroup>
+```bash Repository Selection
+? How would you like to add a project?
+  > Enter git remote URL
+    Choose GitHub repository
+```
+
+```bash GitHub Picker
+Fetching repositories...
+? Select a repository:
+  > username/awesome-project
+    username/another-repo
+    company/backend-api
+```
+
+```bash Manual Entry
+? Enter git remote URL (or owner/repo): username/my-project
+Selected: username/my-project
+Cloning to ~/gitspace/my-project...
+✓ Cloned to ~/gitspace/my-project
+✓ Project 'my-project' created
+✓ Set as current project
+```
+</CodeGroup>
+
+## Bundle Onboarding
+
+If a project bundle is detected (in `.gitspace/bundle/` directory) or provided via `--bundle-url`/`--bundle-path`, the command will:
+
+1. Detect the bundle and display its name
+2. Prompt to run onboarding steps
+3. Execute onboarding workflow (prompts, secrets, confirmations)
+4. Apply bundle configuration to the project
+5. Clean up temporary bundle files
+
+<Note>
+  Bundle onboarding is skipped if `--skip-bundle` is provided, or if you decline the onboarding prompt.
+</Note>
+
+## Error Handling
+
+The command validates:
+- Repository doesn't already exist as a project
+- Repository URL is valid and accessible
+- GitHub CLI is authenticated (if using GitHub picker)
+- No duplicate repositories across projects
+
+<CodeGroup>
+```bash Project Already Exists
+✗ Error: Project 'my-project' already exists at ~/gitspace/my-project/
+```
+
+```bash Duplicate Repository
+✗ Error: Repository username/my-project is already tracked by project "existing-project"
+
+Use that project with:
+  gssh workspace list --project existing-project
+```
+</CodeGroup>
+
+## Requirements
+
+- Git must be installed and available in PATH
+- GitHub CLI (`gh`) is optional but recommended for repository picker
+- If using GitHub picker, you must be authenticated: `gh auth login`
+
+## Related Commands
+
+- [`gssh project list`](/cli/project/list) - List all projects
+- [`gssh project remove`](/cli/project/remove) - Remove a project
+- [`gssh workspace add`](/cli/workspace/add) - Add a workspace to a project

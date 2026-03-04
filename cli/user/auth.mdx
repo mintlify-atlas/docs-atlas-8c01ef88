@@ -1,0 +1,354 @@
+---
+title: gssh user auth
+description: Authenticate with gitspace.sh using GitHub OAuth device flow
+---
+
+## Overview
+
+The `gssh user auth` commands manage authentication with the gitspace.sh platform, which provides:
+
+- **Subdomain hosting** - Reserve `<name>.gitspace.sh` for browser-based terminal access
+- **Automatic tunneling** - Cloudflare tunnel setup when you run `gssh machine serve start`
+- **GitHub OAuth** - Login using your GitHub account via device flow
+- **Identity-signed tokens** - Credentials are cryptographically bound to your machine identity
+
+<Note>
+  Authentication with gitspace.sh is **optional**. You can self-host relay servers and use `gssh machine serve start --relay <url>` without any account.
+</Note>
+
+## Prerequisites
+
+<Warning>
+  You must create a machine identity before authenticating:
+  
+  ```bash
+  gssh user identity init
+  ```
+  
+  Authentication requires signing with your Ed25519 private key to prove ownership of your machine.
+</Warning>
+
+## Commands
+
+### gssh user auth login
+
+Login to gitspace.sh using GitHub OAuth device flow.
+
+```bash
+gssh user auth login
+```
+
+#### Authentication flow
+
+<Steps>
+  <Step title="Load your identity">
+    You'll be prompted for your identity password to unlock your signing key
+  </Step>
+  <Step title="Get GitHub client ID">
+    Fetches the OAuth client ID from the gitspace.sh API
+  </Step>
+  <Step title="Request device code">
+    Initiates GitHub device authorization flow
+  </Step>
+  <Step title="Authorize in browser">
+    Opens GitHub in your browser to enter the one-time code and approve access
+  </Step>
+  <Step title="Exchange for token">
+    Once authorized, exchanges the GitHub token for a gitspace.sh API token signed with your identity
+  </Step>
+  <Step title="Save to keychain">
+    Stores the API token securely in your OS keychain
+  </Step>
+  <Step title="Sync subdomain config">
+    Fetches any existing subdomains you've reserved and optionally prompts to reserve or select a primary subdomain
+  </Step>
+</Steps>
+
+#### Example
+
+```bash
+$ gssh user auth login
+Loading identity...
+Enter identity password: ••••••••
+Starting GitHub authentication...
+
+! First, copy your one-time code: A1B2-C3D4
+
+Press Enter to open https://github.com/login/device in your browser...
+Browser opened. Waiting for authorization...
+.........
+
+Completing authentication...
+
+Authentication complete
+Logged in as octocat
+Token saved to keychain
+
+# Subdomain sync happens next (see gssh user host commands)
+```
+
+<Note>
+  In headless/SSH environments where the browser cannot be opened automatically, you'll see:
+  
+  ```
+  Open this URL in your browser: https://github.com/login/device
+  Enter the code: A1B2-C3D4
+  ```
+</Note>
+
+#### What gets sent to gitspace.sh
+
+```json
+{
+  "github_token": "gho_...",
+  "machine_pubkey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "device_name": "MacBook-Pro.local",
+  "auth_timestamp": 1705315800000,
+  "auth_signature": "<Ed25519 signature of 'gitspace-device-auth:{timestamp}'>"
+}
+```
+
+The signature proves you control the private key for `machine_pubkey`.
+
+---
+
+### gssh user auth logout
+
+Logout from gitspace.sh by clearing local credentials.
+
+```bash
+gssh user auth logout
+```
+
+<Note>
+  This only removes the token from your local keychain. It does **not** revoke the token on the server or affect any active tunnels.
+</Note>
+
+#### Example
+
+```bash
+$ gssh user auth logout
+Logged out
+
+$ gssh user auth status
+Not logged in
+Run: gssh user auth login
+```
+
+---
+
+### gssh user auth status
+
+Check your current authentication status with gitspace.sh.
+
+```bash
+gssh user auth status
+```
+
+#### Example (logged in)
+
+```bash
+$ gssh user auth status
+Logged in as: octocat
+Email: octocat@github.com
+Name: The Octocat
+```
+
+#### Example (not logged in)
+
+```bash
+$ gssh user auth status
+Not logged in
+Run: gssh user auth login
+```
+
+#### Example (session expired)
+
+```bash
+$ gssh user auth status
+Session expired or invalid
+Run: gssh user auth login
+```
+
+#### Example (API unreachable)
+
+```bash
+$ gssh user auth status
+Could not verify session (API unreachable)
+Token is saved locally
+```
+
+## Token Storage
+
+### Keychain location
+
+- **macOS**: Keychain Access (item: `GITSPACE_TOKEN`)
+- **Linux**: Secret Service API (via libsecret)
+- **Windows**: Credential Manager
+
+### Token format
+
+The gitspace.sh API returns a JWT token:
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMTIzNDU2Nzg5MCIsImdpdGh1Yl91c2VybmFtZSI6Im9jdG9jYXQiLCJtYWNoaW5lX3B1YmtleSI6IkFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0iLCJpYXQiOjE3MDUzMTU4MDAsImV4cCI6MTcwNTQwMjIwMH0.dG9rZW5fc2lnbmF0dXJl
+```
+
+This token is included in the `Authorization: Bearer <token>` header for all gitspace.sh API requests.
+
+## GitHub Scopes
+
+The OAuth flow requests the following scopes:
+
+- `read:user` - Read your basic GitHub profile information
+- `user:email` - Read your email address
+
+<Note>
+  GitSpace does **not** request repository access. All git operations use the `gh` CLI and your existing GitHub CLI authentication.
+</Note>
+
+## Device Authentication
+
+The device flow is designed for CLI applications and works in these environments:
+
+- **Interactive terminals** - Opens browser automatically
+- **SSH sessions** - Displays URL for manual browser navigation
+- **Headless servers** - Shows URL and code for remote authorization
+
+### Why device flow?
+
+- No need to paste tokens or redirect URLs
+- Works on remote servers via SSH
+- No localhost web server required
+- GitHub native flow (same as `gh auth login`)
+
+## Common Workflows
+
+### First-time setup with hosting
+
+```bash
+# Create identity first
+gssh user identity init
+
+# Login to gitspace.sh
+gssh user auth login
+
+# Reserve a subdomain (happens during login or manually)
+gssh user host reserve my-workspace
+
+# Start serving with automatic tunnel
+gssh machine serve start
+
+# Access via browser at https://my-workspace.gitspace.sh
+```
+
+### Re-login after token expiry
+
+```bash
+$ gssh machine serve start
+Error: Authentication required. Run `gssh user auth login`
+
+$ gssh user auth login
+# Follow the flow...
+
+$ gssh machine serve start
+Serving on https://my-workspace.gitspace.sh
+```
+
+### Switch GitHub accounts
+
+```bash
+# Logout from current account
+gssh user auth logout
+
+# Login with different GitHub account
+gssh user auth login
+# Authorize with the new account in the browser
+```
+
+## API Endpoints
+
+The authentication flow interacts with these endpoints:
+
+| Endpoint | Purpose |
+|----------|----------|
+| `GET /config` | Fetch GitHub OAuth client ID |
+| `POST /auth/github/device` | Exchange GitHub token for gitspace.sh token |
+| `GET /me` | Verify current session and get user info |
+
+### Configuration
+
+By default, the CLI uses `https://api.gitspace.sh`. Override with:
+
+```bash
+export GITSPACE_API_URL=https://api.staging.gitspace.sh
+gssh user auth login
+```
+
+## Troubleshooting
+
+### "No identity found"
+
+You must create an identity before authenticating:
+
+```bash
+gssh user identity init
+gssh user auth login
+```
+
+### "Failed to load identity"
+
+Check your password and try again. If you've forgotten your password, you can recover with your mnemonic:
+
+```bash
+gssh user identity recover
+```
+
+### "GitHub device flow failed"
+
+This usually means:
+- GitHub is down (check [GitHub Status](https://www.githubstatus.com/))
+- Network connectivity issue
+- API configuration error
+
+Retry the command or check your internet connection.
+
+### "Authorization expired"
+
+The device code expires after ~15 minutes. Run `gssh user auth login` again.
+
+### "Session expired or invalid"
+
+Your token has expired or been revoked. Login again:
+
+```bash
+gssh user auth login
+```
+
+### Keychain access denied
+
+On macOS, grant terminal access to Keychain:
+
+1. Open **Keychain Access** app
+2. Find the `GITSPACE_TOKEN` item
+3. Right-click → Get Info → Access Control
+4. Add your terminal application
+
+## Security Considerations
+
+<Warning>
+  - **Tokens are bearer credentials** - anyone with your token can act as you on gitspace.sh
+  - **Tokens are machine-specific** - bound to your signing key via the auth signature
+  - **Don't share tokens** - use identity-based access control instead
+  - **Revoke on compromise** - logout immediately if you suspect token theft
+</Warning>
+
+<Note>
+  The API token is **not** the same as your GitHub personal access token. It's a gitspace.sh-specific JWT that proves you own both a GitHub account and a machine identity.
+</Note>
+
+## Related Commands
+
+- [gssh user identity](/cli/user/identity) - Create and manage your identity
+- [gssh user host reserve](/cli/host/reserve) - Reserve and manage subdomains
+- [gssh machine serve](/cli/machine/serve) - Start the machine daemon with hosting

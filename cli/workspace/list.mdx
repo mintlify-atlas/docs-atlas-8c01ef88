@@ -1,0 +1,221 @@
+---
+title: "gssh workspace list"
+description: "List workspaces in a project"
+---
+
+## Synopsis
+
+```bash
+gssh workspace list --project <name> [options]
+```
+
+## Description
+
+Displays all workspaces in the specified project with their git status, including:
+- Workspace names
+- Commits ahead/behind tracking branch
+- Uncommitted changes count
+- Stale workspace warnings
+- Last commit information (verbose mode)
+
+Workspaces are displayed with indentation and formatted columns for easy scanning.
+
+## Options
+
+<ParamField path="--project" type="string" required>
+  Project name to list workspaces from
+</ParamField>
+
+<ParamField path="--json" type="boolean" optional default="false">
+  Output workspace information in JSON format instead of human-readable table.
+  
+  JSON output includes:
+  - `name` - Workspace name
+  - `path` - Absolute path to workspace directory
+  - `branch` - Current git branch
+  - `ahead` - Commits ahead of tracking branch
+  - `behind` - Commits behind tracking branch
+  - `uncommittedChanges` - Number of uncommitted files
+  - `lastCommit` - Last commit message
+  - `lastCommitDate` - Last commit date (ISO 8601)
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" optional default="false">
+  Show additional details for each workspace:
+  - Last commit message
+  - Last commit date
+  - Full workspace information
+</ParamField>
+
+## Output Format
+
+### Standard Output
+
+```
+Workspaces (myapp):
+  feature-auth                                  +2 -0      clean               
+  fix-login-bug                                 +0 -3      1 uncommitted       
+  old-experiment                                +0 -10     clean                [stale: 45 days]
+```
+
+Columns:
+1. **Workspace Name** (45 chars, truncated with `...` if longer)
+2. **Ahead/Behind** (`+X -Y` format)
+3. **Status** (`clean` or `N uncommitted`)
+4. **Stale Warning** (if older than configured threshold, default 30 days)
+
+### Verbose Output
+
+```
+Workspaces (myapp):
+  feature-auth                                  +2 -0      clean               
+    Last commit: Add authentication middleware
+    Date: 3/3/2026
+
+  fix-login-bug                                 +0 -3      1 uncommitted       
+    Last commit: Fix login validation
+    Date: 3/4/2026
+```
+
+### JSON Output
+
+```json
+[
+  {
+    "name": "feature-auth",
+    "path": "/home/user/gitspace/myapp/workspaces/feature-auth",
+    "branch": "feature-auth",
+    "ahead": 2,
+    "behind": 0,
+    "uncommittedChanges": 0,
+    "lastCommit": "Add authentication middleware",
+    "lastCommitDate": "2026-03-03T10:30:00.000Z"
+  },
+  {
+    "name": "fix-login-bug",
+    "path": "/home/user/gitspace/myapp/workspaces/fix-login-bug",
+    "branch": "fix/login-bug",
+    "ahead": 0,
+    "behind": 3,
+    "uncommittedChanges": 1,
+    "lastCommit": "Fix login validation",
+    "lastCommitDate": "2026-03-04T14:20:00.000Z"
+  }
+]
+```
+
+## Examples
+
+### List workspaces in a project
+
+```bash
+gssh workspace list --project myapp
+```
+
+Shows all workspaces with basic status information.
+
+### List with detailed information
+
+```bash
+gssh workspace list --project myapp --verbose
+```
+
+Includes last commit message and date for each workspace.
+
+### Get JSON output for scripting
+
+```bash
+gssh workspace list --project myapp --json
+```
+
+Outputs structured JSON suitable for parsing by scripts or tools.
+
+### Count workspaces
+
+```bash
+gssh workspace list --project myapp --json | jq 'length'
+```
+
+Uses `jq` to count the number of workspaces.
+
+### Find stale workspaces
+
+```bash
+gssh workspace list --project myapp --json | \
+  jq '.[] | select(.uncommittedChanges == 0 and .ahead == 0)'
+```
+
+Filters for workspaces with no uncommitted changes and no commits ahead.
+
+## Status Indicators
+
+### Ahead/Behind (`+X -Y`)
+
+- `+0 -0` - Branch is up to date with remote
+- `+2 -0` - 2 commits ahead (unpushed local commits)
+- `+0 -3` - 3 commits behind (remote has new commits)
+- `+1 -2` - Diverged (1 ahead, 2 behind)
+
+### Uncommitted Changes
+
+- `clean` - No uncommitted changes
+- `1 uncommitted` - 1 uncommitted file
+- `5 uncommitted` - 5 uncommitted files
+
+Count includes both staged and unstaged changes.
+
+### Stale Warning
+
+- `[stale: 45 days]` - Last commit was 45 days ago
+- Threshold configurable via global config `staleDays` (default: 30)
+- Helps identify abandoned or forgotten workspaces
+
+## Empty State
+
+If no workspaces exist:
+
+```
+No workspaces found in project "myapp"
+
+Create a workspace:
+  gssh workspace add --project myapp
+```
+
+## Implementation Details
+
+The command:
+1. Reads workspace directory at `~/gitspace/<project>/workspaces/`
+2. For each workspace subdirectory:
+   - Runs `git worktree` commands to get status
+   - Parses git log for last commit info
+   - Calculates ahead/behind using `git rev-list`
+   - Counts uncommitted changes via `git status --porcelain`
+3. Sorts workspaces (implementation-defined order)
+4. Formats output based on flags
+
+## Performance
+
+<Note>
+  For projects with many workspaces (50+), listing may take a few seconds as each workspace requires multiple git operations. Consider using `--json` for faster processing in scripts.
+</Note>
+
+## Related Commands
+
+- [`gssh workspace add`](/cli/workspace/add) - Create a new workspace
+- [`gssh workspace remove`](/cli/workspace/remove) - Remove a workspace
+- [`gssh workspace context`](/cli/workspace/context) - Show current workspace context
+- [`gssh project list`](/cli/project/list) - List all projects
+
+## Configuration
+
+### Global Config (`~/.gitspace/.config.json`)
+
+```json
+{
+  "staleDays": 30
+}
+```
+
+<ParamField path="staleDays" type="number" default="30">
+  Number of days before a workspace is considered stale and shows a warning
+</ParamField>

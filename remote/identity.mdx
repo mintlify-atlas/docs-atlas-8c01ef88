@@ -1,0 +1,421 @@
+---
+title: 'Identity Management'
+description: 'Ed25519/X25519 keypair generation and device certificates'
+icon: 'fingerprint'
+---
+
+GitSpace uses cryptographic identities based on Ed25519 signing keys and X25519 key exchange keys. This page covers identity generation, recovery, and the owner-only access model.
+
+## Identity Architecture
+
+### User Root Identity
+
+Your **user root identity** is your canonical identity across all devices:
+
+- **24-word BIP39 mnemonic**: Secret recovery phrase stored in OS keychain
+- **Ed25519 signing keypair**: For identity signatures (derived from mnemonic)
+- **X25519 key exchange keypair**: For encryption (derived from mnemonic)  
+- **User root ID**: First 16 characters of base64url-encoded signing public key
+
+```
+Mnemonic (24 words)
+    ↓
+[BIP39 Seed Derivation]
+    ↓
+Ed25519 Private Key → Ed25519 Public Key → User Root ID
+    ↓
+X25519 Private Key → X25519 Public Key
+```
+
+Implementation: [src/core/user-identity.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/core/user-identity.ts)
+
+### Device Certificates
+
+Each device (machine or client) has a **device certificate** that binds it to your user root:
+
+```typescript
+interface DeviceCertificate {
+  userRootId: string;              // Owner user root ID
+  deviceSigningPublicKey: string;  // Device Ed25519 public key (base64)
+  deviceKexPublicKey: string;      // Device X25519 public key (base64)
+  signature: string;               // Signature from user root key
+  issuedAt: number;                // Unix timestamp (ms)
+  expiresAt: number;               // Unix timestamp (ms)
+}
+```
+
+The certificate proves that:
+1. This device belongs to a specific user root identity
+2. The certificate was signed by the user root private key
+3. The certificate is still valid (not expired)
+
+Implementation: [src/lib/tmux-lite/crypto/device-cert.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/device-cert.ts)
+
+## Key Generation
+
+### Create User Root Identity
+
+```bash
+gssh user identity init
+```
+
+<Steps>
+  <Step title="Generate mnemonic">
+    Creates a 24-word BIP39 recovery phrase using cryptographically secure randomness
+  </Step>
+  
+  <Step title="Derive keys">
+    Derives Ed25519 and X25519 keypairs from the mnemonic seed
+  </Step>
+  
+  <Step title="Store in keychain">
+    Saves mnemonic to OS keychain (Keychain on macOS, Secret Service on Linux)
+  </Step>
+  
+  <Step title="Display recovery phrase">
+    Shows the 24-word phrase ONCE - write it down and store safely!
+  </Step>
+</Steps>
+
+**Example output:**
+
+```
+=== YOUR 24-WORD RECOVERY PHRASE ===
+
+ 1. abandon     7. device      13. kingdom    19. romance
+ 2. ability     8. diary       14. kitchen    20. route
+ 3. able        9. differ      15. kiwi       21. royal
+ 4. about      10. digital     16. knife      22. rubber
+ 5. above      11. dignity     17. knock      23. rude
+ 6. absent     12. dilemma     18. know       24. rug
+
+=== WRITE THIS DOWN AND STORE IT SAFELY ===
+
+This phrase is the ONLY way to recover your identity on a new device.
+It will NOT be shown again after this step.
+The mnemonic is stored in your OS keychain on this machine.
+
+Identity created and stored in keychain
+
+Identity Information:
+  ID:          YzN5MTIzNDU2Nzg5
+  Fingerprint: Kx4f:2nB9:mP3q:vR8s:dM7w:hJ2k:pN8r:tV5x
+
+Public Key:
+  gssh-user:YzN5MTIzNDU2Nzg5;Bc3y12345678+AbCdEfGhIjKlMnOpQrStUvWxYz1234=;Xy1z23456789/WxYzAbCdEfGhIjKlMnOpQrStUvWxYz12=
+```
+
+<Warning>
+**Critical**: Write down your 24-word recovery phrase and store it in a secure location. This is the ONLY way to recover your identity if you lose access to this device. GitSpace cannot recover your identity for you.
+</Warning>
+
+### Show Identity Information
+
+```bash
+gssh user identity show
+```
+
+Displays public identity info without revealing private keys:
+
+```
+Identity Information:
+  ID:          YzN5MTIzNDU2Nzg5
+  Fingerprint: Kx4f:2nB9:mP3q:vR8s:dM7w:hJ2k:pN8r:tV5x
+  Created:     2026-03-04T10:30:00.000Z
+
+Public Key:
+  gssh-user:YzN5MTIzNDU2Nzg5;...
+```
+
+### Export Public Key
+
+```bash
+gssh user identity export
+```
+
+Outputs just the public key string (suitable for piping):
+
+```
+gssh-user:YzN5MTIzNDU2Nzg5;Bc3y12345678+AbCdEfGhIjKlMnOpQrStUvWxYz1234=;Xy1z23456789/WxYzAbCdEfGhIjKlMnOpQrStUvWxYz12=
+```
+
+## Identity Recovery
+
+### Recover from Mnemonic
+
+To use your identity on a new device:
+
+```bash
+gssh user identity recover
+```
+
+<Steps>
+  <Step title="Enter mnemonic">
+    Paste your 24-word recovery phrase (space-separated)
+  </Step>
+  
+  <Step title="Derive keys">
+    Identical keypairs are derived from the mnemonic
+  </Step>
+  
+  <Step title="Store in keychain">
+    Mnemonic is saved to this device's OS keychain
+  </Step>
+  
+  <Step title="Verify identity">
+    User root ID and fingerprint should match original device
+  </Step>
+</Steps>
+
+**Example:**
+
+```bash
+$ gssh user identity recover
+Enter your 24-word recovery phrase (space-separated):
+Mnemonic: abandon ability able about above absent device diary differ ...
+
+Deriving identity from mnemonic...
+Identity recovered and stored in keychain
+
+Identity Information:
+  ID:          YzN5MTIzNDU2Nzg5
+  Fingerprint: Kx4f:2nB9:mP3q:vR8s:dM7w:hJ2k:pN8r:tV5x
+
+Public Key:
+  gssh-user:YzN5MTIzNDU2Nzg5;...
+```
+
+<Info>
+After recovering, verify the **User Root ID** and **Fingerprint** match your original identity. If they don't match, you may have entered the wrong mnemonic.
+</Info>
+
+### Remove Identity
+
+To remove your identity from the current device:
+
+```bash
+gssh user identity remove
+```
+
+<Warning>
+**This action removes your identity from this device's keychain.** You can only recover it with your 24-word mnemonic. Make sure you have your recovery phrase before proceeding.
+</Warning>
+
+## Machine Enrollment
+
+### Enroll Machine with Relay
+
+Before a machine can serve connections, it must be enrolled with a relay using a **relay-machine invite token**:
+
+```bash
+# 1. Get machine public keys
+gssh user identity show --json | jq -r '.publicKey'
+
+# 2. Create invite on relay (run on device with relay access)
+gssh invite relay-machine create \
+  --relay wss://relay.example.com/ws \
+  --machine-signing-key YzN5MTIzNDU2Nzg5... \
+  --machine-key-exchange-key Xy1z23456789... \
+  --label "My Development Machine"
+
+# 3. Enroll machine with returned token
+gssh machine enroll --invite "wss://relay.example.com/ws#eyJ0eXAi..."
+```
+
+<Steps>
+  <Step title="Create relay-machine invite">
+    Generate a one-time token that authorizes a specific machine identity
+  </Step>
+  
+  <Step title="Machine enrolls with token">
+    Machine proves ownership of the specified keys and registers with relay
+  </Step>
+  
+  <Step title="Relay binds machine to owner">
+    Relay stores machine ID and owner user root ID mapping
+  </Step>
+  
+  <Step title="Machine can serve">
+    Machine is now authorized to accept owner connections
+  </Step>
+</Steps>
+
+**Invite token structure:**
+
+```
+wss://relay.example.com/ws#<BASE64_TOKEN>
+                          ↑
+                          Token contains:
+                          - Invite ID
+                          - Target machine keys
+                          - Owner signature
+                          - Expiration time
+```
+
+Implementation: [src/lib/tmux-lite/crypto/root-invites.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/lib/tmux-lite/crypto/root-invites.ts)
+
+### List Enrolled Machines
+
+```bash
+gssh relay machines list
+```
+
+Shows all machines enrolled with the relay:
+
+```
+Machine ID        Label                    Status    Enrolled
+abc123...         My Development Machine   online    2026-03-01
+def456...         Production Server        offline   2026-02-15
+```
+
+### Revoke Machine
+
+Remove a machine from the relay registry:
+
+```bash
+gssh relay machines revoke <machine-id>
+```
+
+This prevents the machine from registering with the relay (requires restart to take effect).
+
+## Owner-Only Access Model
+
+GitSpace uses a strict owner-only authorization model:
+
+### Authorization Rules
+
+1. **Relay binding**: Each relay is bound to exactly one owner user root ID
+2. **Device certificates**: Every connection presents a device certificate
+3. **Owner verification**: Relay verifies certificate's `userRootId` matches relay owner
+4. **Runtime check**: Machine handshake validates client owns same user root identity
+
+### Authorization Flow
+
+```
+Client                         Relay                          Machine
+   │                              │                               │
+   │──connect_to_machine─────────▶│                               │
+   │  (signed, with cert)         │──[verify signature]           │
+   │                              │──[extract userRootId from cert]│
+   │                              │──[check: userRootId == relay owner?]│
+   │                              │                               │
+   │                              │──[if authorized]              │
+   │                              │──client_connected────────────▶│
+   │◀─connection_established──────│                               │
+   │                              │                               │
+   │──handshake (X3DH with cert)─┼──────────────────────────────▶│
+   │                              │                               │──[verify cert signature]
+   │                              │                               │──[check cert userRootId]
+   │                              │                               │──[derive session keys]
+   │◀──────────────────────────────E2E encrypted session─────────▶│
+```
+
+See [src/relay/server.ts:handleConnectToMachine](https://github.com/gitspace-sh/gitspace/blob/main/src/relay/server.ts) for implementation.
+
+## Key Rotation
+
+<Warning>
+**Key rotation is not yet implemented.** Once you generate a user root identity, it cannot be changed. Protect your mnemonic carefully.
+</Warning>
+
+Planned features:
+- Device key rotation (generate new device keys while keeping user root)
+- User root migration (generate new root, re-sign all device certificates)
+- Revocation lists (mark compromised keys as invalid)
+
+## Storage Locations
+
+### User Root Identity
+
+- **Mnemonic**: OS keychain (`GITSPACE_USER_ROOT_MNEMONIC`)
+- **Public info cache**: `~/.gitspace/.identity/user-root.json`
+
+### Device Identity
+
+- **Encrypted keypair**: `~/.gitspace/.identity/keypair.json`
+- **Machine info**: `~/.gitspace/.identity/machine.json`
+
+### Relay Configuration
+
+- **Relay auth store**: `~/.gitspace/.relay/control/control.db`
+- **Relay config cache**: `~/.gitspace/.identity/relay.json`
+
+<Info>
+The encrypted keypair file is protected with a password. The password is NOT stored anywhere - you must enter it when starting `gssh machine serve`.
+</Info>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Mnemonic Storage">
+    - Write down your 24-word phrase on paper
+    - Store in a secure location (safe, safety deposit box)
+    - Consider splitting across multiple locations (words 1-12 + words 13-24)
+    - Never store digitally (email, cloud storage, screenshots)
+    - Never share with anyone - GitSpace support will NEVER ask for it
+  </Accordion>
+  
+  <Accordion title="Device Security">
+    - Use strong passwords for device identity encryption
+    - Enable full-disk encryption on all devices
+    - Revoke access for lost/stolen devices immediately
+    - Rotate device keys periodically (when implemented)
+  </Accordion>
+  
+  <Accordion title="Recovery Testing">
+    - Test recovery on a new device BEFORE you need it
+    - Verify identity matches original (ID + fingerprint)
+    - Keep multiple backup copies of mnemonic in different locations
+    - Update backups if you ever rotate keys
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### "No identity found"
+
+**Problem**: `gssh user identity show` reports no identity exists.
+
+**Solutions**:
+- Run `gssh user identity init` to create new identity
+- Run `gssh user identity recover` if you have a mnemonic
+- Check OS keychain for `GITSPACE_USER_ROOT_MNEMONIC` entry
+
+### "Failed to unlock identity"
+
+**Problem**: `gssh machine serve start` fails with password error.
+
+**Solutions**:
+- Verify you're entering the correct device password
+- Check `~/.gitspace/.identity/keypair.json` exists and is readable
+- Try re-initializing device identity (will lose current device keys)
+
+### "Identity ID mismatch"
+
+**Problem**: After recovery, identity ID doesn't match original.
+
+**Solutions**:
+- Verify you entered the correct 24-word mnemonic
+- Check for typos in the recovery phrase
+- Ensure words are in the correct order
+- Try recovery again with original mnemonic
+
+## API Reference
+
+See the [Identity CLI reference](/cli/user/identity) for all identity management commands.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="gitspace.sh Hosting" icon="cloud" href="/remote/gitspace-sh">
+    Set up hosted relay with your identity
+  </Card>
+  
+  <Card title="Self-Hosted Relay" icon="server" href="/remote/self-hosted">
+    Run your own relay with custom identity
+  </Card>
+  
+  <Card title="Security Model" icon="shield" href="/remote/security">
+    Understand cryptographic security guarantees
+  </Card>
+</CardGroup>

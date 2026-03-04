@@ -1,0 +1,521 @@
+---
+title: Development Guide
+description: Set up GitSpace CLI for development and contribute to the project
+icon: code
+---
+
+This guide helps you set up a development environment for GitSpace CLI and make contributions to the project.
+
+## Prerequisites
+
+Before you start, ensure you have:
+
+- **Bun 1.3.8+** - [Install Bun](https://bun.sh/)
+- **Git** - [Install Git](https://git-scm.com/)
+- **GitHub CLI** - [Install gh](https://cli.github.com/)
+- **Node.js** (optional, for some tooling) - [Install Node](https://nodejs.org/)
+
+## Getting Started
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/inKibra/gitspace.sh.git
+cd gitspace.sh
+```
+
+### Install Dependencies
+
+```bash
+bun install
+```
+
+This installs all required packages including:
+- TypeScript compiler and types
+- Testing framework
+- CLI dependencies (Commander, Inquirer)
+- Cryptography libraries (@noble/curves, @noble/hashes)
+- UI frameworks (OpenTUI, React)
+
+## Development Workflow
+
+### Running in Dev Mode
+
+```bash
+# Run GitSpace CLI from source
+bun run dev
+
+# Run with arguments
+bun run dev project list
+bun run dev relay start
+bun run dev machine serve start --foreground
+```
+
+This runs the CLI directly from TypeScript source files without building.
+
+### Type Checking
+
+```bash
+bun run typecheck
+```
+
+Runs TypeScript compiler in check mode (no output files). Fix any type errors before committing.
+
+### Linting
+
+```bash
+bun run lint
+```
+
+Runs ESLint on the `src/` directory. Ensure code follows project style guidelines.
+
+### Running Tests
+
+```bash
+# Run all tests
+bun test
+
+# Run specific test file
+bun test src/utils/__tests__/workspace-state.test.ts
+
+# Run tests with coverage
+bun test --coverage
+
+# Run integration tests (requires TTY)
+GSSH_RUN_TTY_KEYBOARD_TEST=1 bun test src/tui/__tests__/kitty-keyboard.opentui.test.ts
+```
+
+<Note>
+Some integration tests require a real terminal and are skipped by default. Set environment variables to enable them.
+</Note>
+
+## Building the Project
+
+### Build for Current Platform
+
+```bash
+bun run build
+```
+
+Creates a standalone executable in `bin/gssh` for your current platform.
+
+### Build for All Platforms
+
+```bash
+bun run build:all
+```
+
+Builds executables for:
+- `darwin-arm64` (macOS Apple Silicon)
+- `darwin-x64` (macOS Intel)
+- `linux-x64` (Linux x64)
+- `linux-arm64` (Linux ARM64)
+
+### Build for npm Distribution
+
+```bash
+bun run build:npm
+```
+
+Builds all platform binaries and packages them for npm publication.
+
+## Project Structure
+
+Understanding the codebase layout:
+
+```
+src/
+├── commands/          # CLI command implementations
+│   ├── add.ts         # Project/workspace creation
+│   ├── auth.ts        # GitHub OAuth (gitspace.sh)
+│   ├── relay.ts       # Relay server commands
+│   └── serve.ts       # Machine daemon commands
+├── core/              # Core business logic
+│   ├── config.ts      # Configuration management
+│   ├── git.ts         # Git worktree operations
+│   ├── identity.ts    # Machine identity
+│   └── bundle.ts      # Bundle handling
+├── lib/               # Shared libraries
+│   ├── tmux-lite/     # Terminal multiplexer
+│   │   ├── server.ts  # Session manager
+│   │   ├── crypto/    # E2E encryption
+│   │   └── protocol.ts # Wire protocol
+│   └── processes/     # Process management
+├── relay/             # Relay server implementation
+│   ├── server.ts      # WebSocket routing
+│   ├── protocol.ts    # Message types
+│   └── control/       # ACL & vault storage
+├── serve/             # Machine daemon
+│   ├── daemon.ts      # Lifecycle management
+│   └── client-session-manager.ts
+├── session/           # Session state management
+│   ├── backends/      # Local & remote backends
+│   └── crypto/        # Web crypto (browser)
+├── tui/               # Terminal UI (OpenTUI)
+│   └── index.ts       # TUI entry point
+├── web/               # Web UI (React)
+│   └── src/App.tsx    # Web terminal app
+├── types/             # TypeScript definitions
+│   ├── identity.ts    # Identity & crypto types
+│   ├── config.ts      # Config types
+│   └── bundle.ts      # Bundle format
+└── utils/             # Utility functions
+    ├── logger.ts      # Colored logging
+    ├── prompts.ts     # User input
+    └── secrets.ts     # Keychain integration
+```
+
+## Key Concepts for Contributors
+
+### Identity System
+
+GitSpace uses Ed25519/X25519 cryptography for identity:
+
+- **Ed25519** - Signing (authentication)
+- **X25519** - Key exchange (encryption)
+- **X3DH** - Handshake protocol for forward secrecy
+
+**Relevant files:**
+- `src/lib/tmux-lite/crypto/identity.ts`
+- `src/lib/tmux-lite/crypto/handshake.ts`
+- `src/core/identity.ts`
+
+### Relay Protocol
+
+The relay uses WebSocket for routing encrypted messages:
+
+**Message flow:**
+```
+Client → [Encrypted] → Relay → [Encrypted] → Machine
+```
+
+Relay cannot decrypt content (E2E encryption).
+
+**Relevant files:**
+- `src/relay/protocol.ts` - Message types
+- `src/relay/server.ts` - WebSocket server
+- `src/lib/tmux-lite/crypto/frames.ts` - Encrypted frames
+
+### Bundle System
+
+Bundles provide onboarding configuration for repositories:
+
+**Structure:**
+```
+.gitspace/
+├── bundle.json           # Manifest
+└── scripts/
+    ├── setup/            # Run on setup state change
+    ├── select/           # Run on terminal attach
+    └── remove/           # Run before workspace deletion
+```
+
+**Relevant files:**
+- `src/core/bundle.ts` - Bundle loading
+- `src/utils/onboarding.ts` - Onboarding flow
+- `src/utils/run-scripts.ts` - Script execution
+
+### Workspace State
+
+Workspaces track setup completion with `gitspace.lock`:
+
+**State machine:**
+```
+NEW → SETUP_PENDING → SETUP_COMPLETE
+```
+
+**Relevant files:**
+- `src/utils/workspace-state.ts`
+- `src/utils/__tests__/workspace-state.test.ts`
+
+## Testing Guidelines
+
+### Unit Tests
+
+Test isolated functions and modules:
+
+```typescript
+import { describe, test, expect } from 'bun:test';
+import { sanitizeBranchName } from '../sanitize';
+
+describe('sanitizeBranchName', () => {
+  test('removes special characters', () => {
+    expect(sanitizeBranchName('my@feature!')).toBe('myfeature');
+  });
+});
+```
+
+### Integration Tests
+
+Test component interactions:
+
+```typescript
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { mkdtemp, rm } from 'fs/promises';
+import { join } from 'path';
+
+describe('workspace setup', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp('/tmp/gssh-test-');
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  test('creates workspace structure', async () => {
+    // Test implementation
+  });
+});
+```
+
+### Test Environment Variables
+
+Use environment variables to control test behavior:
+
+```bash
+# Enable test secrets backend
+GSSH_ENABLE_TEST_SECRETS_BACKEND=1 bun test
+
+# Run with test tmux-lite paths
+TMUX_LITE_SOCKET=/tmp/test.sock bun test
+```
+
+## Code Style Guidelines
+
+### TypeScript
+
+- Use strict mode (enabled in `tsconfig.json`)
+- Prefer `const` over `let`
+- Use explicit types for function parameters and return values
+- Avoid `any` - use `unknown` or proper types
+
+**Good:**
+```typescript
+export async function loadConfig(path: string): Promise<Config | null> {
+  // Implementation
+}
+```
+
+**Bad:**
+```typescript
+export async function loadConfig(path: any): Promise<any> {
+  // Implementation
+}
+```
+
+### Error Handling
+
+Use typed errors from `types/errors.ts`:
+
+```typescript
+import { SpacesError } from '../types/errors';
+
+if (!configExists) {
+  throw new SpacesError(
+    'Configuration file not found',
+    'USER_ERROR',
+    1
+  );
+}
+```
+
+### Logging
+
+Use the logger utility:
+
+```typescript
+import { logger } from '../utils/logger';
+
+logger.success('Operation completed');
+logger.error('Operation failed');
+logger.warning('Deprecated feature');
+logger.info('Informational message');
+logger.dim('Debug details');
+```
+
+### User Prompts
+
+Use prompts utility for user input:
+
+```typescript
+import { promptConfirm, selectOne } from '../utils/prompts';
+
+const confirmed = await promptConfirm('Delete workspace?');
+const choice = await selectOne([
+  { label: 'Option A', value: 'a' },
+  { label: 'Option B', value: 'b' },
+], 'Select option');
+```
+
+## Running Components Separately
+
+### Relay Server
+
+```bash
+# Start relay on default port 4480
+bun run relay
+
+# Or with environment overrides
+RELAY_PORT=4481 bun run relay
+```
+
+### Web UI
+
+```bash
+cd web
+bun install
+bun run dev
+```
+
+Web UI runs on `http://localhost:5173` (Vite dev server).
+
+### E2E Tests
+
+```bash
+bun run e2e:on-demand
+```
+
+Runs end-to-end tests in `scripts/e2e/`.
+
+## Debugging
+
+### VS Code Launch Configuration
+
+```json .vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug GitSpace CLI",
+      "type": "bun",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/index.ts",
+      "args": ["project", "list"],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
+```
+
+### Console Debugging
+
+Add debug logging:
+
+```typescript
+console.log('[debug]', variableName);
+console.error('[error]', errorObject);
+```
+
+### Inspect Daemon Logs
+
+```bash
+# Serve daemon logs
+tail -f ~/gitspace/.serve/serve.log
+
+# tmux-lite session logs
+ls /tmp/tmux-lite-sessions-*/
+```
+
+## Contributing
+
+### Branching Strategy
+
+- `main` - Stable release branch
+- `develop` - Development branch
+- `feature/*` - Feature branches
+- `fix/*` - Bug fix branches
+
+### Commit Messages
+
+Follow conventional commits:
+
+```
+feat: add Linear integration
+fix: resolve identity unlock issue
+docs: update relay configuration guide
+test: add bundle onboarding tests
+```
+
+### Pull Request Process
+
+1. **Fork the repository**
+2. **Create feature branch** from `develop`
+3. **Make changes** with tests
+4. **Run checks:**
+   ```bash
+   bun run typecheck
+   bun run lint
+   bun test
+   ```
+5. **Commit changes** with conventional commit messages
+6. **Push to your fork**
+7. **Open Pull Request** to `develop` branch
+
+<Note>
+All PRs require passing CI checks and code review before merging.
+</Note>
+
+## Release Process
+
+<Warning>
+Only maintainers can publish releases.
+</Warning>
+
+### Version Bump
+
+```bash
+# Update version in package.json
+npm version patch  # 0.2.0 → 0.2.1
+npm version minor  # 0.2.0 → 0.3.0
+npm version major  # 0.2.0 → 1.0.0
+```
+
+### Build & Publish
+
+```bash
+# Build all platforms
+bun run build:npm
+
+# Publish to npm
+npm publish
+```
+
+### Tag Release
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+## Documentation
+
+When making changes, update relevant documentation:
+
+- `README.md` - User-facing features
+- `AGENTS.md` - Developer reference
+- `docs/*.md` - Specific subsystem documentation
+
+## Getting Help
+
+- **GitHub Discussions** - Ask questions
+- **GitHub Issues** - Report bugs
+- **Discord** - Real-time chat (link in README)
+
+## Resources
+
+- [Bun Documentation](https://bun.sh/docs)
+- [OpenTUI Framework](https://github.com/opentui/opentui)
+- [Ed25519 Spec](https://ed25519.cr.yp.to/)
+- [X3DH Protocol](https://signal.org/docs/specifications/x3dh/)
+- [Commander.js](https://github.com/tj/commander.js)
+
+## License
+
+GitSpace CLI is proprietary software. See `LICENSE` file for details.
+
+---
+
+Thank you for contributing to GitSpace! Your work helps developers manage workspaces more efficiently.

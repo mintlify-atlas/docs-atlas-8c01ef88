@@ -1,0 +1,286 @@
+---
+title: "gssh workspace remove"
+description: "Remove a workspace and optionally delete its branch"
+---
+
+## Synopsis
+
+```bash
+gssh workspace remove [workspace-name] --project <name> [options]
+```
+
+## Description
+
+Removes a workspace (git worktree) from a project. This command:
+1. Removes the worktree directory
+2. Optionally deletes the associated git branch
+3. Kills any active tmux-lite sessions in the workspace
+4. Runs cleanup scripts from `.gitspace/scripts/remove/` (if configured)
+
+The command includes safety prompts to prevent accidental deletion, especially when uncommitted changes exist.
+
+## Arguments
+
+<ParamField path="workspace-name" type="string" optional>
+  Name of the workspace to remove. If not provided, an interactive prompt will show all available workspaces for selection.
+</ParamField>
+
+## Options
+
+<ParamField path="--project" type="string" required>
+  Project name containing the workspace
+</ParamField>
+
+<ParamField path="--force" type="boolean" optional default="false">
+  Skip confirmation prompts. Still shows workspace status before removal.
+  
+  **Warning**: Use with caution as this bypasses safety checks.
+</ParamField>
+
+<ParamField path="--keep-branch" type="boolean" optional default="false">
+  Don't delete the git branch when removing the workspace. The branch will remain in the repository even though the worktree is removed.
+  
+  Useful when:
+  - You want to recreate the workspace later
+  - The branch is shared or already pushed
+  - You want to manually manage branch deletion
+</ParamField>
+
+## Interactive Flow
+
+### Workspace Selection
+
+If no workspace name is provided:
+
+```
+Select workspace to remove:
+> feature-auth
+  fix-login-bug
+  old-experiment
+```
+
+### Confirmation Prompt
+
+```
+Workspace: feature-auth
+Branch: feature-auth
+Uncommitted changes: 3
+
+This workspace has 3 uncommitted changes
+Remove workspace "feature-auth"? (y/N)
+```
+
+### Cleanup Script Failure
+
+If cleanup scripts fail:
+
+```
+Warning: Remove scripts failed
+Remove workspace "feature-auth" anyway and skip cleanup scripts? (y/N)
+```
+
+## Examples
+
+### Remove workspace with confirmation
+
+```bash
+gssh workspace remove feature-auth --project myapp
+```
+
+Prompts for confirmation, removes workspace and deletes branch.
+
+### Remove without prompts (force)
+
+```bash
+gssh workspace remove feature-auth --project myapp --force
+```
+
+Skips confirmation prompts but still shows workspace status.
+
+### Remove but keep the branch
+
+```bash
+gssh workspace remove feature-auth --project myapp --keep-branch
+```
+
+Removes the worktree but leaves the git branch intact.
+
+### Interactive selection
+
+```bash
+gssh workspace remove --project myapp
+```
+
+Shows a list of workspaces to choose from.
+
+### Force remove with branch kept
+
+```bash
+gssh workspace remove feature-auth --project myapp --force --keep-branch
+```
+
+Combines both options for scripting scenarios.
+
+## Removal Process
+
+1. **Validation**: Checks if workspace exists
+2. **Status Check**: Gets workspace git status (uncommitted changes, branch name)
+3. **Warning Display**: Shows uncommitted changes if present
+4. **Confirmation**: Prompts user unless `--force` is used
+5. **Cleanup Scripts**: Runs `.gitspace/scripts/remove/*` scripts
+6. **Session Termination**: Kills active tmux-lite sessions
+7. **Worktree Removal**: Removes git worktree and directory
+8. **Branch Deletion**: Deletes git branch unless `--keep-branch` is set
+
+## Cleanup Scripts
+
+If the workspace has `.gitspace/scripts/remove/` scripts, they are executed before removal:
+
+- Scripts can perform cleanup tasks (stop services, delete temp files, etc.)
+- If any script fails, you're prompted to either abort or skip cleanup
+- Use `--force` to automatically skip failed cleanup scripts
+
+### Example Remove Script
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/remove/cleanup.sh
+
+# Stop local development server
+killall -9 node 2>/dev/null || true
+
+# Remove temp files
+rm -rf /tmp/myapp-* 2>/dev/null || true
+
+exit 0
+```
+
+## Output Examples
+
+### Successful Removal
+
+```
+Removing workspace...
+Removed worktree: feature-auth
+Deleted branch: feature-auth
+```
+
+### With Active Sessions
+
+```
+Removing workspace...
+Killed 2 active session(s)
+Removed worktree: feature-auth
+Deleted branch: feature-auth
+```
+
+### Branch Deletion Failed
+
+```
+Removing workspace...
+Removed worktree: feature-auth
+Could not delete branch: feature-auth
+```
+
+This can happen if the branch is checked out elsewhere or protected.
+
+### With --keep-branch
+
+```
+Removing workspace...
+Removed worktree: feature-auth
+```
+
+Branch is intentionally kept, so no deletion message.
+
+## Error Handling
+
+<Note>
+  **Common Errors:**
+  
+  - **Workspace not found**: Specified workspace doesn't exist
+  - **No workspaces found**: Project has no workspaces
+  - **No project specified**: Must provide `--project` flag
+  - **Cleanup script failed**: Scripts in `.gitspace/scripts/remove/` returned non-zero exit code
+  - **Branch deletion failed**: Branch is protected, checked out elsewhere, or already deleted
+</Note>
+
+## Uncommitted Changes Warning
+
+If the workspace has uncommitted changes:
+
+```
+Workspace: feature-auth
+Branch: feature-auth
+Uncommitted changes: 5
+
+This workspace has 5 uncommitted changes
+```
+
+You must explicitly confirm to proceed. This prevents accidental loss of work.
+
+## Session Termination
+
+Any active tmux-lite sessions in the workspace are automatically killed:
+
+- Sessions are forcefully terminated
+- Connected clients are disconnected
+- Session count is reported: `Killed 2 active session(s)`
+
+## Branch Deletion Behavior
+
+### Default (delete branch)
+
+By default, the git branch is deleted after worktree removal:
+- Local branch is deleted with `git branch -D`
+- Remote tracking branch is **not** deleted (use `git push origin --delete <branch>` manually)
+
+### With --keep-branch
+
+The branch remains in the repository:
+- Can be checked out later
+- Can be used to recreate the workspace
+- Useful for shared/pushed branches
+
+### When Deletion Fails
+
+Branch deletion can fail if:
+- Branch is checked out in another worktree
+- Branch doesn't exist (already deleted)
+- Permission issues
+- Protected branch
+
+A warning is shown but the workspace removal still succeeds.
+
+## Related Commands
+
+- [`gssh workspace add`](/cli/workspace/add) - Create a new workspace
+- [`gssh workspace list`](/cli/workspace/list) - List workspaces
+- [`gssh project remove`](/cli/project/remove) - Remove entire project
+- [`gssh machine tmux list`](/cli/tmux/commands) - List active sessions
+
+## Safety Considerations
+
+<Warning>
+  **Data Loss Prevention:**
+  
+  - Always shows uncommitted changes count
+  - Requires explicit confirmation (unless `--force`)
+  - Prompts again if cleanup scripts fail
+  - No way to recover workspace after removal (unless branch is kept)
+  
+  **Best Practices:**
+  - Review workspace status with `gssh workspace list` first
+  - Commit or stash important changes before removal
+  - Push branches to remote before removing if needed
+  - Use `--keep-branch` if uncertain
+</Warning>
+
+## Implementation Details
+
+- Located in: `src/commands/remove.ts` as `removeWorkspace()`
+- Delegates to: `src/core/workspace.ts` `deleteWorkspaceCore()` for actual deletion
+- Git operations:
+  - `git worktree remove <path>`
+  - `git branch -D <branch>`
+- Session operations via tmux-lite socket commands

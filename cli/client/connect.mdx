@@ -1,0 +1,268 @@
+---
+title: "gssh client connect"
+description: "Connect to a remote machine with owner identity authorization"
+---
+
+## Overview
+
+The `gssh client connect` command establishes an end-to-end encrypted terminal session with a remote machine. Connections use owner identity authorization, granting full access to all workspaces.
+
+<Note>
+  This command requires your user root identity to be authorized by the remote machine owner. See [Remote Access](/remote/overview) for setup details.
+</Note>
+
+## Usage
+
+```bash
+gssh client connect <machine-id> --relay <url>
+```
+
+### Arguments
+
+<ParamField path="target" type="string">
+  Machine ID to connect to. Can be passed positionally or via `--machine`.
+</ParamField>
+
+<ParamField path="--machine" type="string">
+  Alternative syntax for specifying machine ID.
+</ParamField>
+
+<ParamField path="--relay" type="string">
+  Relay URL to connect through. If omitted, uses saved relay config from `~/.gitspace/.identity/relay.json`.
+</ParamField>
+
+---
+
+## Connection Flow
+
+<Steps>
+  <Step title="Authenticate identity">
+    Prompts for password to unlock your user root identity.
+  </Step>
+  
+  <Step title="Create device certificate">
+    Generates a local device certificate signed by your user root identity.
+  </Step>
+  
+  <Step title="Connect to relay">
+    Opens WebSocket to relay with `?role=client` parameter.
+  </Step>
+  
+  <Step title="X3DH handshake">
+    Establishes forward-secret session keys with remote machine using Extended Triple Diffie-Hellman.
+  </Step>
+  
+  <Step title="List workspaces">
+    Queries available workspaces on remote machine.
+  </Step>
+  
+  <Step title="Select workspace">
+    Interactive prompt to choose workspace to open.
+  </Step>
+  
+  <Step title="Attach session">
+    Creates or attaches to terminal session in selected workspace.
+  </Step>
+  
+  <Step title="Interactive terminal">
+    Forwards stdin/stdout, handles resize events, sends Ctrl+D to disconnect.
+  </Step>
+</Steps>
+
+---
+
+## Examples
+
+### Connect to Machine
+
+```bash
+gssh client connect abc123def456 --relay wss://relay.example.com/ws
+```
+
+Output:
+```
+Remote Connection Details:
+
+  Machine:     abc123def456
+  Access:      Owner identity required
+  Relay:       wss://relay.example.com/ws
+
+Connect to this machine? (Y/n)
+```
+
+### Session Interaction
+
+After workspace selection:
+
+```
+Connected!
+
+Access: Full access
+
+Select workspace to open:
+❯ feature-auth (myproject)
+  fix-ui-bug (myproject)
+  docs-update (website)
+
+Session name (optional): feature-work
+
+Attached to feature-work
+
+Press Ctrl+D to disconnect
+
+user@remote:~/gitspace/myproject/workspaces/feature-auth$ 
+```
+
+### Using Saved Relay Config
+
+If relay config exists:
+
+```bash
+gssh client connect abc123def456
+# Uses relay from ~/.gitspace/.identity/relay.json
+```
+
+---
+
+## Access Control
+
+### Owner Identity Authorization
+
+Owner access grants:
+- **Full workspace access**: Read/write to all workspaces
+- **Session creation**: Create new terminal sessions
+- **Command execution**: Run arbitrary commands in workspaces
+
+Owner authorization is granted by:
+
+1. Machine owner running: `gssh machine access add <gssh-user:your-user-id>`
+2. Or via machine-user invite: `gssh invite machine-user create <machine-id> <gssh-user:your-id> --relay <url>`
+
+<Warning>
+  Owner access is equivalent to SSH access. Only grant to trusted collaborators.
+</Warning>
+
+---
+
+## Terminal Controls
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+D` | Disconnect and exit |
+| `Ctrl+C` | Send interrupt signal to remote process |
+| `Ctrl+Z` | Send suspend signal to remote process |
+
+### Terminal Resize
+
+The local terminal size is automatically synchronized:
+
+- Initial size sent on attach
+- Resize events forwarded in real-time
+- Remote PTY resizes to match
+
+---
+
+## End-to-End Encryption
+
+All connection data is E2E encrypted:
+
+### X3DH Handshake
+
+1. Client fetches machine's prekey bundle from relay
+2. Client generates ephemeral keypair
+3. Client performs 4 Diffie-Hellman exchanges:
+   - `DH1`: Client identity × Machine signing key
+   - `DH2`: Client ephemeral × Machine identity
+   - `DH3`: Client ephemeral × Machine signing key
+   - `DH4`: Client ephemeral × Machine prekey
+4. Shared secret derived via HKDF-SHA256
+
+### Session Encryption
+
+- **Algorithm**: AES-256-GCM
+- **Key rotation**: Per-session keys, forward-secret
+- **Frame format**: Encrypted type + payload
+- **Relay role**: Routes ciphertext, cannot decrypt
+
+<Note>
+  The relay server never has access to plaintext terminal content. Even a compromised relay cannot decrypt sessions.
+</Note>
+
+---
+
+## Session Management
+
+### Named Sessions
+
+Provide a session name when prompted:
+
+```
+Session name (optional): debugging
+```
+
+Benefits:
+- Reconnect to same session later
+- Share session name with collaborators
+- Easier identification in session lists
+
+### Session Lifecycle
+
+- **Created**: On first attach with name
+- **Detached**: When connection closes (process continues)
+- **Reattach**: Run `gssh client connect` again and select same workspace
+- **Exited**: When shell process exits (cleaned up automatically)
+
+---
+
+## Troubleshooting
+
+### "Connection failed: Machine not found"
+
+The machine ID is not registered with the relay:
+
+- Verify machine ID is correct
+- Confirm machine is enrolled: `gssh machine enroll --invite <token>`
+- Check machine serve daemon is running: `gssh machine serve status`
+
+### "Connection failed: Access denied"
+
+Your identity is not authorized:
+
+1. Request access from machine owner
+2. Owner grants access: `gssh machine access add <gssh-user:your-id>`
+3. Or accept invite: `gssh user auth invite accept <token>`
+
+### "Failed to unlock identity"
+
+Identity password incorrect:
+
+- Verify password
+- Check identity exists: `gssh user identity show`
+- Re-initialize if lost: `gssh user identity init`
+
+### "Timed out waiting for workspace list"
+
+Remote machine connectivity issues:
+
+- Confirm machine serve daemon is running
+- Check relay connectivity from both sides
+- Verify firewall rules allow WebSocket connections
+
+### "Relay closed the connection before enrollment completed"
+
+Relay authentication failed:
+
+- Verify your identity is authorized on the relay
+- Check relay logs for error details
+- Ensure relay is configured to accept your user root ID
+
+---
+
+## Related Commands
+
+- [`gssh client machines list`](/cli/client/machines) - List accessible machines
+- [`gssh machine serve start`](/cli/machine/serve) - Start remote access daemon
+- [`gssh user identity init`](/cli/user/identity) - Initialize user root identity
+- [`gssh machine serve start`](/cli/machine/serve) - Start serving (owner)

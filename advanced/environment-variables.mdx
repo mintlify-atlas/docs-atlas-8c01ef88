@@ -1,0 +1,447 @@
+---
+title: Environment Variables
+description: Complete reference of environment variables used by GitSpace CLI
+icon: list-tree
+---
+
+GitSpace CLI uses environment variables for configuration, runtime behavior, and secure token management. This page documents all supported environment variables.
+
+## Relay Server Configuration
+
+These variables control the relay server behavior when running `gssh relay start`.
+
+### `RELAY_PORT`
+
+**Default:** `4480`
+
+Port number for the relay server to listen on.
+
+```bash
+RELAY_PORT=4481 gssh relay start
+```
+
+<Note>
+Port `4480` spells "GIT0" on a phone keypad - the default relay port.
+</Note>
+
+### `RELAY_BIND`
+
+**Default:** `0.0.0.0`
+
+Bind address for the relay server.
+
+```bash
+# Listen on localhost only
+RELAY_BIND=127.0.0.1 gssh relay start
+
+# Listen on all interfaces (default)
+RELAY_BIND=0.0.0.0 gssh relay start
+```
+
+### `RELAY_HOST`
+
+**Default:** None
+
+Optional hostname restriction - relay will only serve requests for this domain.
+
+```bash
+RELAY_HOST=relay.example.com gssh relay start
+```
+
+### `RELAY_PRIVATE_KEY`
+
+**Default:** Uses OS keychain
+
+Base64-encoded Ed25519 private key for relay identity. If not set, a key is generated and stored in the OS keychain.
+
+```bash
+RELAY_PRIVATE_KEY="base64_encoded_key_here" gssh relay start
+```
+
+<Warning>
+Storing private keys in environment variables is less secure than using the OS keychain. Only use this for testing or automated deployments where keychain access is unavailable.
+</Warning>
+
+### `RELAY_LABEL`
+
+**Default:** None
+
+Optional human-readable label for the relay identity.
+
+```bash
+RELAY_LABEL="Production Relay" gssh relay start
+```
+
+## tmux-lite Daemon Configuration
+
+These variables control the tmux-lite multiplexer daemon behavior.
+
+### `TMUX_LITE_SOCKET`
+
+**Default:** `/tmp/tmux-lite-{user}.sock` (Unix) or OS-specific temp directory
+
+Unix socket path for tmux-lite server communication.
+
+```bash
+TMUX_LITE_SOCKET=/var/run/tmux-lite.sock gssh machine tmux start
+```
+
+### `TMUX_LITE_SESSION_DIR`
+
+**Default:** `/tmp/tmux-lite-sessions-{user}` (Unix) or OS-specific temp directory
+
+Directory where tmux-lite stores session state.
+
+```bash
+TMUX_LITE_SESSION_DIR=/var/lib/tmux-lite/sessions gssh machine tmux start
+```
+
+### `TMUX_LITE_PID_FILE`
+
+**Default:** `/tmp/tmux-lite-{user}.pid` (Unix) or OS-specific temp directory
+
+PID file location for the tmux-lite daemon.
+
+```bash
+TMUX_LITE_PID_FILE=/var/run/tmux-lite.pid gssh machine tmux start
+```
+
+### `TMUX_LITE_CTRL_C_MODE`
+
+**Default:** None
+
+Internal variable used by tmux-lite for Ctrl+C handling in PTY sessions.
+
+<Note>
+This is automatically set by the tmux-lite server and should not be manually configured.
+</Note>
+
+## GitSpace Control & Storage
+
+### `GITSPACE_CONTROL_DIR`
+
+**Default:** `~/gitspace/.relay/control`
+
+Override directory for relay control database (ACL, invites, vault).
+
+```bash
+GITSPACE_CONTROL_DIR=/custom/path/control gssh relay start
+```
+
+<Note>
+Primarily used for testing and advanced deployments. Most users should rely on the default location.
+</Note>
+
+### `GITSPACE_SERVE_DAEMON_DIR`
+
+**Default:** `~/gitspace/.serve`
+
+Directory for machine serve daemon state (PID files, status socket).
+
+```bash
+GITSPACE_SERVE_DAEMON_DIR=/var/lib/gitspace/serve gssh machine serve start
+```
+
+## gitspace.sh Platform Integration
+
+### `GITSPACE_API_URL`
+
+**Default:** `https://api.gitspace.sh`
+
+API endpoint for the gitspace.sh hosted platform.
+
+```bash
+# Use staging environment
+GITSPACE_API_URL=https://api.staging.gitspace.sh gssh user auth login
+```
+
+### `GITSPACE_TOKEN`
+
+**Storage:** OS Keychain (not environment variable)
+
+Authentication token for gitspace.sh API. Stored securely in OS keychain after `gssh user auth login`.
+
+```bash
+# View token (requires keychain access)
+gssh user auth status
+```
+
+### `TUNNEL_TOKEN`
+
+Cloudflare Tunnel token for hosting subdomain. Automatically set by `gssh machine serve start` when using gitspace.sh hosting.
+
+<Note>
+This token is stored in OS keychain as `TUNNEL_TOKEN_{subdomain}` and injected into the cloudflared process environment.
+</Note>
+
+## Development & Testing Variables
+
+These variables are used for development, testing, and CI/CD environments.
+
+### `BUN_TEST`
+
+**Values:** `1` (enabled) or unset
+
+Indicates code is running in Bun test mode. Switches to test-only secrets backend.
+
+```bash
+BUN_TEST=1 bun test
+```
+
+### `BUN_ENV`
+
+**Values:** `test` or other
+
+Bun environment mode. When set to `test`, enables test-only features.
+
+```bash
+BUN_ENV=test bun run typecheck
+```
+
+### `NODE_ENV`
+
+**Values:** `test`, `development`, `production`
+
+Node.js environment mode. Affects logging and error handling.
+
+```bash
+NODE_ENV=development bun run dev
+```
+
+### `GSSH_ENABLE_TEST_SECRETS_BACKEND`
+
+**Values:** `1` (enabled) or unset
+
+Force enable file-based secrets backend for testing (bypasses OS keychain).
+
+```bash
+GSSH_ENABLE_TEST_SECRETS_BACKEND=1 bun test
+```
+
+### `GSSH_TEST_SECRETS_FILE`
+
+**Default:** Temporary file in test directory
+
+Path to JSON file for test secrets storage.
+
+```bash
+GSSH_TEST_SECRETS_FILE=/tmp/test-secrets.json bun test
+```
+
+### `GSSH_TEST_RUNTIME`
+
+**Values:** `1` (enabled) or unset
+
+Indicates GitSpace is running in test runtime mode.
+
+```bash
+GSSH_TEST_RUNTIME=1 bun test
+```
+
+### `GSSH_RUN_TTY_KEYBOARD_TEST`
+
+**Values:** `1` (enabled) or unset
+
+Enable interactive TTY keyboard tests (requires real terminal).
+
+```bash
+GSSH_RUN_TTY_KEYBOARD_TEST=1 bun test src/tui/__tests__/kitty-keyboard.opentui.test.ts
+```
+
+### `GSSH_UNLOCK_REQUEST_TIMEOUT_MS`
+
+**Default:** `30000` (30 seconds)
+
+Timeout for unlock grant requests in milliseconds.
+
+```bash
+GSSH_UNLOCK_REQUEST_TIMEOUT_MS=60000 gssh machine serve start --unlock-token ...
+```
+
+### `OWNER_SYNC_MACHINE_E2E`
+
+**Values:** `1` (enabled) or unset
+
+Enable owner-sync machine end-to-end test mode.
+
+```bash
+OWNER_SYNC_MACHINE_E2E=1 bun test
+```
+
+### `SPRITES_E2E`
+
+**Values:** `1` (enabled) or unset
+
+Enable Sprites integration live end-to-end tests.
+
+```bash
+SPRITES_E2E=1 SPRITES_TOKEN=... bun test
+```
+
+### `SPRITES_TOKEN`
+
+Sprites API token for integration testing.
+
+```bash
+SPRITES_TOKEN=your_token_here SPRITES_E2E=1 bun test
+```
+
+### `SPRITES_APP_ID`
+
+Sprites application ID for integration testing.
+
+```bash
+SPRITES_APP_ID=gssh-test SPRITES_E2E=1 bun test
+```
+
+### `SPRITES_BASE_URL`
+
+Sprites API base URL override for testing.
+
+```bash
+SPRITES_BASE_URL=https://sprites.staging.example.com SPRITES_E2E=1 bun test
+```
+
+## Bundle Script Variables
+
+These variables are automatically passed to bundle scripts during execution.
+
+### Custom Bundle Values
+
+Any values collected during bundle onboarding are available as environment variables using:
+
+1. **Exact key name** from `bundle.json` `configKey`
+2. **Normalized uppercase snake_case** version
+
+**Example:**
+
+```json bundle.json
+{
+  "onboarding": [
+    {
+      "id": "api-key",
+      "type": "secret",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team",
+      "type": "input",
+      "configKey": "teamName"
+    }
+  ]
+}
+```
+
+**Available in scripts:**
+
+```bash .gitspace/scripts/setup/01-configure.sh
+#!/bin/bash
+
+# Both formats work:
+echo "API Key: $apiKey"        # Exact key
+echo "API Key: $API_KEY"       # Normalized
+
+echo "Team: $teamName"          # Exact key
+echo "Team: $TEAM_NAME"         # Normalized
+```
+
+### Script Execution Context
+
+**Working Directory:** Workspace directory (`~/gitspace/{project}/workspaces/{workspace}`)
+
+**Arguments:**
+- `$1`: Workspace name
+- `$2`: Repository name (e.g., `owner/repo`)
+
+**Example:**
+
+```bash .gitspace/scripts/select/01-status.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Workspace: $WORKSPACE_NAME"
+echo "Repository: $REPOSITORY"
+```
+
+## Standard System Variables
+
+GitSpace also respects standard system environment variables:
+
+### `HOME`
+
+User home directory. Used to locate `~/gitspace` by default.
+
+### `PATH`
+
+Search path for executables. GitSpace requires `gh`, `git`, and `jq` in PATH.
+
+### `SHELL`
+
+**Default shell for PTY sessions.** Falls back to `/bin/bash` if not set.
+
+```bash
+# Use zsh for sessions
+SHELL=/bin/zsh gssh machine serve start
+```
+
+## Environment Variable Precedence
+
+1. **Explicit command-line flags** (highest priority)
+2. **Environment variables**
+3. **Configuration files** (`~/.config.json`, project `.config.json`)
+4. **Built-in defaults** (lowest priority)
+
+**Example:**
+
+```bash
+# Flag overrides environment
+RELAY_PORT=4481 gssh relay start --port 4482
+# Uses port 4482
+```
+
+## Security Best Practices
+
+<Warning>
+**Never commit sensitive environment variables to version control.**
+
+Use `.env` files (gitignored) or OS keychain for secrets.
+</Warning>
+
+### Recommended Approach
+
+1. **Use OS keychain** for secrets (GitSpace default)
+2. **Use `.env` files** for local development (add to `.gitignore`)
+3. **Use secret management tools** (Vault, AWS Secrets Manager) for production
+4. **Avoid shell history** - use `--password-stdin` or prompts for sensitive input
+
+**Example `.env` file:**
+
+```bash .env
+# Local development overrides
+RELAY_PORT=4481
+GITSPACE_API_URL=http://localhost:3000
+```
+
+**Load in shell:**
+
+```bash
+source .env
+gssh relay start
+```
+
+## Viewing Active Environment
+
+To see what environment variables GitSpace is using:
+
+```bash
+# Check relay status (shows port, bind, etc.)
+gssh relay status
+
+# Check serve daemon status
+gssh machine serve status
+
+# View all daemon statuses
+gssh status
+```

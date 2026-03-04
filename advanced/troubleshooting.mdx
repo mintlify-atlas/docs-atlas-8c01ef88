@@ -1,0 +1,384 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for GitSpace CLI
+icon: wrench
+---
+
+This guide covers common issues you may encounter while using GitSpace CLI and how to resolve them.
+
+## Authentication Issues
+
+<Accordion title="GitHub CLI not authenticated">
+  **Error Message:**
+  ```
+  Error: GitHub CLI is not authenticated
+  ```
+
+  **Solution:**
+  
+  Run the GitHub CLI authentication flow:
+  
+  ```bash
+  gh auth login
+  ```
+  
+  Follow the prompts to authenticate with your GitHub account. GitSpace requires GitHub CLI for repository management.
+</Accordion>
+
+<Accordion title="gitspace.sh Authentication Fails">
+  **Symptoms:**
+  - Unable to reserve subdomain
+  - OAuth flow returns errors
+  
+  **Solutions:**
+  
+  1. Log out and log back in:
+     ```bash
+     gssh user auth logout
+     gssh user auth login
+     ```
+  
+  2. Check authentication status:
+     ```bash
+     gssh user auth status
+     ```
+  
+  3. Verify your GitHub account has appropriate permissions
+</Accordion>
+
+## Dependency Issues
+
+<Accordion title="Missing System Dependencies">
+  GitSpace requires the following tools in your PATH:
+  
+  - **GitHub CLI (`gh`)** - [Download](https://cli.github.com/)
+  - **Git** - [Download](https://git-scm.com/)
+  - **jq** - [Download](https://stedolan.github.io/jq/)
+  
+  **Verify Installation:**
+  
+  ```bash
+  which gh git jq
+  ```
+  
+  **Install Missing Dependencies:**
+  
+  <CodeGroup>
+  ```bash macOS (Homebrew)
+  brew install gh git jq
+  ```
+  
+  ```bash Ubuntu/Debian
+  sudo apt-get install gh git jq
+  ```
+  
+  ```bash Fedora/RHEL
+  sudo dnf install gh git jq
+  ```
+  </CodeGroup>
+</Accordion>
+
+<Accordion title="cloudflared Not Installed (Hosting)">
+  **Error Message:**
+  ```
+  cloudflared is not installed
+  ```
+  
+  **Solution:**
+  
+  Install cloudflared for tunnel support:
+  
+  <CodeGroup>
+  ```bash macOS
+  brew install cloudflared
+  ```
+  
+  ```bash Linux
+  # Download from GitHub releases
+  wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+  sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
+  sudo chmod +x /usr/local/bin/cloudflared
+  ```
+  </CodeGroup>
+</Accordion>
+
+## Identity & Security Issues
+
+<Accordion title="Bundle Secrets Not Available">
+  **Symptoms:**
+  - Environment variables from bundle onboarding are empty in scripts
+  - Secret values not accessible
+  
+  **Solutions:**
+  
+  1. **Verify onboarding completion:**
+     ```bash
+     gssh workspace bundle status --project my-project --workspace my-workspace
+     ```
+  
+  2. **Check keychain service:**
+     - **macOS**: Keychain Access should be running
+     - **Linux**: Ensure `libsecret` is installed and `gnome-keyring` or `kwallet` is running
+       ```bash
+       # Ubuntu/Debian
+       sudo apt-get install libsecret-1-0
+       ```
+  
+  3. **Re-run onboarding:**
+     ```bash
+     gssh workspace bundle refresh --project my-project --workspace my-workspace
+     ```
+</Accordion>
+
+<Accordion title="Failed to Unlock Identity">
+  **Error Message:**
+  ```
+  Failed to unlock identity. Check your password.
+  ```
+  
+  **Solutions:**
+  
+  1. Ensure you're using the correct password
+  2. If you've forgotten your password, recover using mnemonic:
+     ```bash
+     gssh user identity recover
+     ```
+  3. Initialize a new identity (will create new keys):
+     ```bash
+     gssh user identity init
+     ```
+     
+  <Warning>
+  Initializing a new identity will disconnect all previously enrolled machines and clients. Use `recover` instead if possible.
+  </Warning>
+</Accordion>
+
+<Accordion title="Relay Identity Mismatch">
+  **Error Message:**
+  ```
+  SECURITY WARNING: Relay public key mismatch!
+  ```
+  
+  **Cause:**
+  The relay server's identity has changed, which could indicate a man-in-the-middle attack or relay reinitialization.
+  
+  **Solutions:**
+  
+  1. **Verify the change is legitimate** (e.g., you intentionally reset the relay)
+  2. **Remove old relay trust entry:**
+     ```bash
+     # Edit trusted relays file
+     nano ~/gitspace/.identity/trusted-relays.json
+     ```
+  3. **Retry connection** - you'll be prompted to trust the new relay identity
+</Accordion>
+
+## Relay & Remote Access Issues
+
+<Accordion title="Relay Server Won't Start">
+  **Symptoms:**
+  - `gssh relay start` exits immediately
+  - Port already in use
+  
+  **Solutions:**
+  
+  1. **Check if relay is already running:**
+     ```bash
+     gssh relay status
+     ```
+  
+  2. **Stop existing relay:**
+     ```bash
+     gssh relay stop
+     ```
+  
+  3. **Use different port:**
+     ```bash
+     RELAY_PORT=4481 gssh relay start
+     ```
+  
+  4. **Check port availability:**
+     ```bash
+     lsof -i :4480
+     ```
+</Accordion>
+
+<Accordion title="Machine Serve Daemon Fails">
+  **Symptoms:**
+  - `gssh machine serve start` exits
+  - Connection refused errors
+  
+  **Diagnostic Steps:**
+  
+  1. **Check daemon status:**
+     ```bash
+     gssh machine serve status
+     ```
+  
+  2. **View daemon logs:**
+     ```bash
+     cat ~/gitspace/.serve/serve.log
+     ```
+  
+  3. **Check for stale state:**
+     ```bash
+     gssh machine serve stop
+     rm -rf ~/gitspace/.serve
+     gssh machine serve start
+     ```
+  
+  4. **Run in foreground for debugging:**
+     ```bash
+     gssh machine serve start --foreground
+     ```
+</Accordion>
+
+<Accordion title="Cannot Connect to Remote Machine">
+  **Checklist:**
+  
+  - [ ] Machine serve daemon is running: `gssh machine serve status`
+  - [ ] Relay is healthy: `gssh relay status`
+  - [ ] Client and machine use same relay URL
+  - [ ] Machine is registered: `gssh relay machines list`
+  - [ ] Identity is initialized: `gssh user identity show`
+  - [ ] Network connectivity to relay
+  
+  **Test relay health:**
+  ```bash
+  curl http://relay-host:4480/health
+  ```
+</Accordion>
+
+## Workspace Issues
+
+<Accordion title="Workspace Creation Fails">
+  **Common Causes:**
+  
+  1. **Invalid branch name** - Use alphanumeric characters and hyphens
+  2. **Branch already exists** - Use `--branch` flag to specify different branch name
+  3. **Git repository errors** - Ensure base repository is clean
+  
+  **Solutions:**
+  
+  ```bash
+  # Create with custom branch name
+  gssh workspace add my-feature --project my-app --branch feature/my-feature
+  
+  # Skip setup scripts
+  gssh workspace add my-feature --project my-app --no-setup
+  ```
+</Accordion>
+
+<Accordion title="Setup Scripts Don't Run">
+  **Checklist:**
+  
+  - [ ] Scripts are executable: `chmod +x .gitspace/scripts/setup/*.sh`
+  - [ ] Scripts are named with numeric prefix: `01-install.sh`
+  - [ ] gitspace.lock doesn't exist yet (setup only runs once)
+  
+  **Force re-run setup:**
+  ```bash
+  cd ~/gitspace/my-project/workspaces/my-workspace
+  rm gitspace.lock
+  # Attach to workspace to trigger setup
+  gssh workspace context --project my-project --workspace my-workspace
+  ```
+</Accordion>
+
+<Accordion title="Bundle Refresh Needed">
+  **When to refresh:**
+  - Bundle configuration changed in repository
+  - New bundle values need to be set
+  - Environment variables missing in scripts
+  
+  **Refresh bundle:**
+  ```bash
+  gssh workspace bundle refresh --project my-project --workspace my-workspace
+  ```
+  
+  **Force complete refresh:**
+  ```bash
+  gssh workspace bundle refresh --project my-project --workspace my-workspace --force
+  ```
+</Accordion>
+
+## Performance Issues
+
+<Accordion title="tmux-lite Sessions Slow">
+  **Solutions:**
+  
+  1. **Check session count:**
+     ```bash
+     gssh machine tmux list
+     ```
+  
+  2. **Kill stale sessions:**
+     ```bash
+     gssh machine tmux kill <session-id>
+     ```
+  
+  3. **Restart tmux-lite daemon:**
+     ```bash
+     gssh machine tmux stop
+     gssh machine tmux start
+     ```
+</Accordion>
+
+## Configuration Issues
+
+<Accordion title="Config File Corrupted">
+  **Symptoms:**
+  - JSON parse errors
+  - Missing projects or workspaces
+  
+  **Recovery:**
+  
+  1. **Backup config:**
+     ```bash
+     cp ~/gitspace/.config.json ~/gitspace/.config.json.backup
+     ```
+  
+  2. **Restore from defaults:**
+     ```json ~/gitspace/.config.json
+     {
+       "currentProject": null,
+       "projectsDir": "/Users/username/gitspace",
+       "defaultBaseBranch": "main",
+       "staleDays": 30
+     }
+     ```
+  
+  3. **Verify project configs exist:**
+     ```bash
+     ls ~/gitspace/*/.config.json
+     ```
+</Accordion>
+
+## Getting Help
+
+<Note>
+If you encounter an issue not covered here:
+
+1. Check daemon logs: `cat ~/gitspace/.serve/serve.log`
+2. Run with verbose output where available
+3. Check unified daemon status: `gssh status`
+4. Report issues at [GitHub Issues](https://github.com/inKibra/gitspace.sh/issues)
+</Note>
+
+## Debug Mode
+
+For advanced troubleshooting, you can run GitSpace in development mode:
+
+```bash
+# Clone the repository
+git clone https://github.com/inKibra/gitspace.sh.git
+cd gitspace.sh
+
+# Install dependencies
+bun install
+
+# Run in dev mode
+bun run dev
+```
+
+This provides additional logging and stack traces for debugging.

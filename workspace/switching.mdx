@@ -1,0 +1,401 @@
+---
+title: Switching Workspaces
+description: Navigate between workspaces and manage active sessions
+---
+
+## Overview
+
+GitSpace uses tmux-lite sessions to manage workspace terminals. You can switch between workspaces, detach from sessions, and reattach later without losing your work.
+
+## Workspace Sessions
+
+Each workspace runs in an isolated tmux-lite session:
+
+- **Session persistence**: Sessions survive terminal disconnects
+- **Multiple attachments**: Attach from multiple terminals simultaneously
+- **Environment isolation**: Each workspace has its own environment variables
+- **Script hooks**: Scripts run automatically on session creation and attachment
+
+## Switching Methods
+
+<Tabs>
+  <Tab title="TUI">
+    ### Interactive TUI
+
+    The TUI is the easiest way to navigate workspaces:
+
+    ```bash
+    gssh
+    ```
+
+    **Key bindings:**
+    - `Tab` - Switch between projects and workspaces panels
+    - `↑/↓` - Navigate items
+    - `Enter` - Open selected workspace
+    - `Shift+Esc` - Detach from current session (return to TUI)
+    - `q` - Quit TUI
+
+    <Note>
+    Press `Shift+Esc` while in a workspace session to detach and return to the GitSpace TUI.
+    </Note>
+  </Tab>
+
+  <Tab title="CLI">
+    ### Command Line
+
+    List workspaces in a project:
+
+    ```bash
+    gssh workspace list --project my-app
+    ```
+
+    Create and attach to a new session:
+
+    ```bash
+    gssh workspace session new my-session --project my-app --workspace my-feature
+    ```
+
+    Attach to an existing session:
+
+    ```bash
+    gssh workspace session attach --session my-session --project my-app --workspace my-feature
+    ```
+  </Tab>
+</Tabs>
+
+## Session Management
+
+### Listing Sessions
+
+View active tmux-lite sessions:
+
+```bash
+# List all sessions
+gssh machine tmux list
+
+# List sessions for a specific workspace
+gssh workspace session list --project my-app --workspace my-feature
+```
+
+<CodeGroup>
+```bash Example Output
+$ gssh machine tmux list
+
+Active sessions:
+  my-app:my-feature:1704067200000
+  my-app:another-feature:1704070800000
+  backend:api-refactor:1704074400000
+
+3 session(s) total
+```
+</CodeGroup>
+
+### Creating Sessions
+
+Create a new workspace session:
+
+```bash
+# Create with auto-generated name (timestamp)
+gssh workspace session new --project my-app --workspace my-feature
+
+# Create with custom name
+gssh workspace session new debug --project my-app --workspace my-feature
+```
+
+Session names follow the pattern:
+```
+<project>:<workspace>:<session-name>
+```
+
+### Attaching Sessions
+
+<Steps>
+  <Step title="Find Session ID">
+    List available sessions:
+
+    ```bash
+    gssh machine tmux list
+    ```
+  </Step>
+
+  <Step title="Attach">
+    Connect to the session:
+
+    ```bash
+    gssh workspace session attach \
+      --session my-app:my-feature:1704067200000 \
+      --project my-app \
+      --workspace my-feature
+    ```
+
+    Use `--force` to take over if attached elsewhere:
+
+    ```bash
+    gssh workspace session attach \
+      --session my-app:my-feature:1704067200000 \
+      --project my-app \
+      --workspace my-feature \
+      --force
+    ```
+  </Step>
+</Steps>
+
+### Detaching Sessions
+
+Detach from a session without killing it:
+
+**In TUI mode:**
+```
+Press Shift+Esc to detach
+```
+
+**In CLI mode:**
+```
+Ctrl+A, then D (tmux-lite detach)
+```
+
+<Note>
+Detaching preserves the session state. You can reattach later and continue where you left off.
+</Note>
+
+## Workspace Scripts
+
+GitSpace runs scripts at different stages of the session lifecycle:
+
+### Script Phases
+
+<CodeGroup>
+```bash Setup Phase
+# Run once when workspace is first created or bundle changes
+~/gitspace/my-app/workspaces/my-feature/.gitspace/scripts/setup/
+├── 01-install-deps.sh
+├── 02-build.sh
+└── 03-migrate-db.sh
+```
+
+```bash Select Phase  
+# Run every time you attach to a workspace session
+~/gitspace/my-app/workspaces/my-feature/.gitspace/scripts/select/
+├── 01-git-fetch.sh
+├── 02-status.sh
+└── 03-show-branch.sh
+```
+</CodeGroup>
+
+### Script Execution
+
+<Steps>
+  <Step title="Setup Scripts">
+    Setup scripts run when:
+    - Workspace is created for the first time
+    - Bundle configuration changes
+    - You manually trigger with `gssh workspace bundle refresh`
+
+    ```bash
+    # Example: Install dependencies
+    #!/bin/bash
+    # .gitspace/scripts/setup/01-install-deps.sh
+
+    WORKSPACE_NAME=$1
+    REPOSITORY=$2
+
+    echo "Installing dependencies for $WORKSPACE_NAME..."
+    npm install
+    ```
+  </Step>
+
+  <Step title="Select Scripts">
+    Select scripts run every time you attach to the workspace:
+
+    ```bash
+    # Example: Git status check
+    #!/bin/bash
+    # .gitspace/scripts/select/01-status.sh
+
+    WORKSPACE_NAME=$1
+    REPOSITORY=$2
+
+    echo "Workspace: $WORKSPACE_NAME"
+    git fetch --quiet
+    git status --short
+    ```
+  </Step>
+</Steps>
+
+### Bundle Values in Scripts
+
+Scripts have access to bundle configuration values:
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/select/01-status.sh
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+# Bundle values available as environment variables
+if [ -n "$TEAM_NAME" ]; then
+  echo "Welcome, $TEAM_NAME team!"
+fi
+
+# Access secrets (stored securely in OS keychain)
+if [ -n "$API_KEY" ]; then
+  echo "API Key configured"
+fi
+```
+
+## Workspace Session Mode
+
+When GitSpace opens a workspace terminal, it injects a `space` shell function for bash/zsh.
+
+### The `space` Function
+
+```bash
+# In a workspace session, use 'space' instead of 'gssh workspace'
+space context --json
+space review hunks src/app.ts --format json
+space review add-hunk src/app.ts --index 1 --approve --body "Looks good"
+```
+
+<Note>
+The `space` command automatically uses the current workspace context (project and workspace names are inferred from environment variables).
+</Note>
+
+### Session Environment Variables
+
+Workspace sessions have these environment variables set:
+
+```bash
+GSSH_SESSION_MODE=workspace
+GSSH_SPACE_PROJECT=my-app
+GSSH_SPACE_WORKSPACE=my-feature
+GSSH_SESSION_ID=my-app:my-feature:1704067200000
+```
+
+### Restricted Commands
+
+In workspace session mode, certain global commands are blocked to prevent mistakes:
+
+```bash
+# ❌ Blocked in workspace sessions
+gssh project add
+gssh project remove
+gssh workspace add --project other-project
+gssh machine tmux list
+
+# ✅ Use 'space' instead
+space context
+space review notes
+space process list
+```
+
+## Examples
+
+<CodeGroup>
+```bash Open Workspace (TUI)
+# Launch TUI
+gssh
+
+# Use arrow keys to select workspace
+# Press Enter to open
+# Work in the session
+# Press Shift+Esc to return to TUI
+```
+
+```bash Open Workspace (CLI)
+# Create new session
+gssh workspace session new --project my-app --workspace my-feature
+
+# Work in the session
+# Detach: Ctrl+A, D
+
+# List sessions
+gssh machine tmux list
+
+# Reattach later
+gssh workspace session attach \
+  --session my-app:my-feature:1704067200000 \
+  --project my-app \
+  --workspace my-feature
+```
+
+```bash Multiple Sessions
+# Create two sessions in the same workspace
+gssh workspace session new session-1 --project my-app --workspace my-feature
+gssh workspace session new session-2 --project my-app --workspace my-feature
+
+# Attach to different sessions from different terminals
+# Terminal 1:
+gssh workspace session attach --session my-app:my-feature:session-1 ...
+
+# Terminal 2:
+gssh workspace session attach --session my-app:my-feature:session-2 ...
+```
+
+```bash Use Space Command
+# Inside a workspace session
+space context
+{
+  "project": "my-app",
+  "workspace": "my-feature",
+  "workspacePath": "/home/user/gitspace/my-app/workspaces/my-feature",
+  "repository": "myorg/my-app",
+  "branch": "my-feature"
+}
+
+# View review notes
+space review notes --format json
+
+# Add hunk review
+space review add-hunk src/app.ts --index 1 --approve
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### Session Not Found
+
+```bash
+Error: Session not found: my-app:my-feature:old-session
+```
+
+**Solution:** List active sessions and use a valid session ID:
+```bash
+gssh machine tmux list
+```
+
+### Already in Session
+
+```bash
+Error: Already inside a tmux-lite session. Detach first with Shift+Esc.
+```
+
+**Solution:** Detach from the current session before creating a new one:
+```
+Press Shift+Esc (in TUI)
+or
+Ctrl+A, D (in CLI)
+```
+
+### Scripts Not Running
+
+```bash
+# Scripts not executing on session attach
+```
+
+**Solution:** Ensure scripts are executable:
+```bash
+chmod +x .gitspace/scripts/select/*.sh
+chmod +x .gitspace/scripts/setup/*.sh
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/workspace/configuration">
+    Configure workspace settings and scripts
+  </Card>
+  <Card title="Session Mode" icon="terminal" href="/workspace/session-mode">
+    Learn about the space command and session environment
+  </Card>
+</CardGroup>

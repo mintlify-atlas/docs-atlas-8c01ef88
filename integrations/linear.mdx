@@ -1,0 +1,270 @@
+---
+title: "Linear Integration"
+description: "Set up and use Linear issue integration with GitSpace"
+---
+
+## Overview
+
+GitSpace integrates with Linear to help you create workspaces directly from Linear issues. Configure your Linear API key and teams at the user level, then optionally customize per-project.
+
+## Setup
+
+### User-Level Configuration
+
+Configure Linear integration for all your projects:
+
+<Steps>
+  <Step title="Get your Linear API key">
+    1. Open Linear and navigate to **Settings → API**
+    2. Under **Personal API keys**, click **Create new key**
+    3. Copy the generated API key
+    
+    <Warning>
+      Keep your API key secure. Never commit it to version control.
+    </Warning>
+  </Step>
+
+  <Step title="Run the setup wizard">
+    ```bash
+    gssh user config linear setup
+    ```
+    
+    This command will:
+    - Prompt for your Linear API key
+    - Validate the key with Linear's API
+    - Fetch all teams you have access to
+    - Let you select which teams to use
+    - Choose a default team for new workspaces
+  </Step>
+
+  <Step title="Verify configuration">
+    ```bash
+    gssh user config linear show
+    ```
+    
+    You should see:
+    - Your masked API key (last 4 characters visible)
+    - List of configured teams with their keys and names
+    - Your default team marked
+  </Step>
+</Steps>
+
+### Project-Level Configuration
+
+Override Linear settings for a specific project:
+
+```bash
+gssh user config linear setup --project <project-name>
+```
+
+You can choose to:
+- **Use user-level API key** - Inherit from your global config (recommended)
+- **Use project-specific API key** - Set a different API key for this project
+
+<Note>
+  Projects automatically inherit user-level settings unless you configure project-specific overrides.
+</Note>
+
+## Usage
+
+### Team Selection
+
+When creating workspaces from Linear issues, GitSpace filters issues based on your configured teams:
+
+- **User-level**: Uses your default team or all configured teams
+- **Project-level**: Uses project-specific team selection if configured
+
+### API Key Resolution
+
+GitSpace resolves your Linear API key in this order:
+
+1. Project-specific API key (if set via `--project` flag)
+2. User-level API key (global default)
+
+## Managing Configuration
+
+### Update API Key
+
+If already configured, the setup wizard shows an update menu:
+
+```bash
+gssh user config linear setup
+```
+
+Options:
+- **Update API key** - Replace your current API key
+- **Modify teams** - Change team selection without changing the key
+- **Cancel** - Keep current configuration
+
+### Update Teams
+
+Modify your team selection:
+
+<CodeGroup>
+```bash User-level
+gssh user config linear setup
+# Choose "Modify teams" from the menu
+```
+
+```bash Project-level
+gssh user config linear setup --project myproject
+# Choose "Modify teams" from the menu
+```
+</CodeGroup>
+
+### View Configuration
+
+<CodeGroup>
+```bash User configuration
+gssh user config linear show
+```
+
+```bash Project configuration
+gssh user config linear show --project myproject
+```
+</CodeGroup>
+
+Output includes:
+- API key (masked, showing last 4 characters)
+- Configured teams with keys and names
+- Default team indicator
+- Source of configuration (user vs. project-specific)
+
+### Clear Configuration
+
+<Warning>
+  This will delete your Linear API key and team configuration. You'll need to set it up again to use Linear integration.
+</Warning>
+
+<CodeGroup>
+```bash Clear user configuration
+gssh user config linear clear
+```
+
+```bash Clear project configuration
+gssh user config linear clear --project myproject
+```
+</CodeGroup>
+
+Clearing project configuration makes the project fall back to user-level defaults.
+
+## Configuration Storage
+
+### API Keys
+
+API keys are stored securely in your system keychain using Bun's secrets management:
+
+- **User-level**: `linear-api-key`
+- **Project-level**: `linear-api-key-<project-name>`
+
+### Team Configuration
+
+Team preferences are stored in:
+
+- **User-level**: `~/gitspace/.config.json`
+  - `linearTeams`: Array of team objects (id, key, name)
+  - `linearDefaultTeam`: Default team key for new workspaces
+
+- **Project-level**: `~/gitspace/<project>/.config.json`
+  - `linearTeams`: Array of team keys to use for this project
+
+## Troubleshooting
+
+### Invalid API Key
+
+If you see "Invalid Linear API key":
+
+1. Verify the key in Linear **Settings → API**
+2. Ensure you copied the entire key without extra spaces
+3. Check that the key hasn't been revoked
+4. Try creating a new API key
+
+### No Teams Found
+
+If the setup wizard shows "No teams found":
+
+- Your Linear account may not be a member of any teams
+- The API key may not have the correct permissions
+- Contact your Linear workspace administrator
+
+### Legacy Configuration Warning
+
+If you see a "Legacy config detected" warning:
+
+```bash
+# Migrate to the new configuration format
+gssh user config linear setup --project <project-name>
+```
+
+This migrates from the deprecated `linearApiKey` and `linearTeamKey` fields to the new team-based configuration.
+
+## Example Workflow
+
+<Steps>
+  <Step title="Initial setup">
+    ```bash
+    # Set up Linear for all projects
+    gssh user config linear setup
+    ```
+  </Step>
+
+  <Step title="Verify configuration">
+    ```bash
+    # Check what's configured
+    gssh user config linear show
+    ```
+  </Step>
+
+  <Step title="Override for specific project">
+    ```bash
+    # Use different teams for a project
+    gssh user config linear setup --project backend-api
+    ```
+  </Step>
+
+  <Step title="Create workspace from Linear issue">
+    When adding a workspace, Linear issues from your configured teams will appear in the selection menu.
+  </Step>
+</Steps>
+
+## API Reference
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `gssh user config linear setup` | Configure Linear integration (user-level) |
+| `gssh user config linear setup --project <name>` | Configure Linear for a specific project |
+| `gssh user config linear show` | Display user-level Linear configuration |
+| `gssh user config linear show --project <name>` | Display project-specific configuration |
+| `gssh user config linear clear` | Clear user-level Linear configuration |
+| `gssh user config linear clear --project <name>` | Clear project-specific configuration |
+
+### Configuration Fields
+
+#### GlobalConfig (User-level)
+
+```typescript
+interface GlobalConfig {
+  linearTeams?: LinearTeamInfo[];      // Teams you have access to
+  linearDefaultTeam?: string;          // Default team key
+}
+
+interface LinearTeamInfo {
+  id: string;     // Linear team ID
+  key: string;    // Team key (e.g., "ENG")
+  name: string;   // Team name (e.g., "Engineering")
+}
+```
+
+#### ProjectConfig (Project-level)
+
+```typescript
+interface ProjectConfig {
+  linearTeams?: string[];  // Team keys for this project
+}
+```
+
+<Note>
+  Projects inherit user-level configuration unless `linearTeams` is explicitly set.
+</Note>

@@ -1,0 +1,479 @@
+---
+title: "Review Commands"
+description: "Manage code review threads and decisions"
+---
+
+## Overview
+
+GitSpace includes a built-in code review system that works with git diffs and GitHub PRs. Review commands allow you to:
+
+- Add comments on hunks, lines, or files
+- Track approve/reject/pending decisions
+- Import GitHub PR review comments
+- Push local review to GitHub as a formal PR review
+- View review threads in the web UI
+
+All review data is stored locally in the workspace directory.
+
+---
+
+## Open Review UI
+
+```bash
+gssh workspace review [--project <name>] [--workspace <name>] [--port <port>]
+```
+
+Opens the browser-based review UI.
+
+<ParamField path="--project" type="string" optional>
+  Project name (auto-detected from cwd if omitted)
+</ParamField>
+
+<ParamField path="--workspace" type="string" optional>
+  Workspace name (auto-detected from cwd if omitted)
+</ParamField>
+
+<ParamField path="--port" type="number" default="4480">
+  Local relay server port (must match `gssh machine serve start`)
+</ParamField>
+
+**Example:**
+```bash
+gssh workspace review
+```
+
+**Output:**
+```
+Opening review UI: http://localhost:4480?view=review&workspace=feature-branch&project=myproject
+(Requires `gssh machine serve start` to be running)
+```
+
+<Note>
+  The review UI is served by the local relay server. Start with `gssh machine serve start` before opening.
+</Note>
+
+---
+
+## Show Review Threads
+
+```bash
+gssh workspace review notes [--project <name>] [--workspace <name>] [--format json|text]
+```
+
+Displays all review threads as JSON (default) or human-readable text.
+
+<ParamField path="--format" type="string" default="json">
+  Output format: `json` (for LLM/tools) or `text` (for humans)
+</ParamField>
+
+**JSON Output (default):**
+```json
+{
+  "threads": [
+    {
+      "id": "thread-1",
+      "target": {
+        "kind": "hunk",
+        "file": "src/auth.ts",
+        "hunkHeader": "@@ -10,5 +10,8 @@ export function login"
+      },
+      "targetRef": "hunk:src/auth.ts:@@ -10,5 +10,8 @@",
+      "targetSummary": "hunk in src/auth.ts (@@ -10,5 +10,8 @@)",
+      "targetKind": "hunk",
+      "hunkHeader": "@@ -10,5 +10,8 @@ export function login",
+      "decision": "approved",
+      "resolved": false,
+      "comments": [
+        {
+          "id": "comment-1",
+          "author": "local",
+          "body": "LGTM - proper error handling",
+          "createdAt": "2026-03-04T10:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Text Output:**
+```bash
+gssh workspace review notes --format text
+```
+
+```
+--- Thread: thread-1 [APPROVED] ---
+Target: hunk in src/auth.ts (@@ -10,5 +10,8 @@)
+Target Ref: hunk:src/auth.ts:@@ -10,5 +10,8 @@
+Hunk Header: @@ -10,5 +10,8 @@ export function login
+  [local @ 2026-03-04T10:00:00.000Z]: LGTM - proper error handling
+```
+
+---
+
+## List Hunks
+
+```bash
+gssh workspace review hunks <file> [--project <name>] [--workspace <name>] [--format json|text]
+```
+
+Lists all hunks in a changed file with stable index and header.
+
+<ParamField path="file" type="string" required>
+  File path (relative to workspace root or basename)
+</ParamField>
+
+**Example:**
+```bash
+gssh workspace review hunks src/auth.ts
+```
+
+**JSON Output (default):**
+```json
+{
+  "file": "src/auth.ts",
+  "prevFilePath": null,
+  "hunks": [
+    {
+      "index": 1,
+      "header": "@@ -10,5 +10,8 @@ export function login",
+      "context": "export function login",
+      "targetRef": "hunk:src/auth.ts:1",
+      "file": "src/auth.ts"
+    },
+    {
+      "index": 2,
+      "header": "@@ -45,3 +48,6 @@ export function logout",
+      "context": "export function logout",
+      "targetRef": "hunk:src/auth.ts:2",
+      "file": "src/auth.ts"
+    }
+  ]
+}
+```
+
+**Text Output:**
+```bash
+gssh workspace review hunks src/auth.ts --format text
+```
+
+```
+Hunks in src/auth.ts:
+  [1] @@ -10,5 +10,8 @@ export function login
+  [2] @@ -45,3 +48,6 @@ export function logout
+```
+
+<Note>
+  Use hunk index (1-based) in `review add-hunk` commands.
+</Note>
+
+---
+
+## Add Hunk Review
+
+```bash
+gssh workspace review add-hunk <file> --index <n> [--approve|--reject|--pending] [--body <text>] [--project <name>] [--workspace <name>] [--json]
+```
+
+Adds or updates a hunk-level review with decision and/or comment.
+
+<ParamField path="file" type="string" required>
+  File path
+</ParamField>
+
+<ParamField path="--index" type="number" required>
+  Hunk index (1-based, from `review hunks`)
+</ParamField>
+
+<ParamField path="--approve" type="flag">
+  Mark hunk as approved
+</ParamField>
+
+<ParamField path="--reject" type="flag">
+  Mark hunk as rejected
+</ParamField>
+
+<ParamField path="--pending" type="flag">
+  Mark hunk as pending review
+</ParamField>
+
+<ParamField path="--body" type="string" optional>
+  Comment text (required if no decision flag)
+</ParamField>
+
+<ParamField path="--json" type="flag">
+  Output JSON instead of human-readable message
+</ParamField>
+
+**Example (approve with comment):**
+```bash
+gssh workspace review add-hunk src/auth.ts --index 1 --approve --body "LGTM - proper error handling"
+```
+
+**Output:**
+```
+✓ Added hunk review on src/auth.ts [1] (@@ -10,5 +10,8 @@)
+```
+
+**Example (reject):**
+```bash
+gssh workspace review add-hunk src/auth.ts --index 2 --reject --body "Use async/await instead of promises"
+```
+
+**Example (comment only):**
+```bash
+gssh workspace review add-hunk src/auth.ts --index 1 --body "Consider adding input validation"
+```
+
+**JSON Output:**
+```bash
+gssh workspace review add-hunk src/auth.ts --index 1 --approve --json
+```
+
+```json
+{
+  "ok": true,
+  "file": "src/auth.ts",
+  "hunkIndex": 1,
+  "hunkHeader": "@@ -10,5 +10,8 @@",
+  "targetRef": "hunk:src/auth.ts:1",
+  "decision": "approved",
+  "threadId": "thread-1",
+  "reusedThread": false,
+  "bodyAdded": true
+}
+```
+
+<Note>
+  If a thread already exists for this hunk, it will be updated instead of creating a duplicate.
+</Note>
+
+---
+
+## Add File Review
+
+```bash
+gssh workspace review add-file <file> --body <text> [--project <name>] [--workspace <name>] [--json]
+```
+
+Adds a file-level review thread.
+
+<ParamField path="file" type="string" required>
+  File path
+</ParamField>
+
+<ParamField path="--body" type="string" required>
+  Comment text
+</ParamField>
+
+**Example:**
+```bash
+gssh workspace review add-file src/auth.ts --body "Consider splitting into separate files for login/logout"
+```
+
+**Output:**
+```
+✓ Added file review thread for src/auth.ts.
+```
+
+**JSON Output:**
+```json
+{
+  "ok": true,
+  "threadId": "thread-2",
+  "targetRef": "file:src/auth.ts",
+  "file": "src/auth.ts"
+}
+```
+
+---
+
+## Add Line Review
+
+```bash
+gssh workspace review add-line <file> --start <n> [--end <n>] [--side LEFT|RIGHT] --body <text> [--project <name>] [--workspace <name>] [--json]
+```
+
+Adds a line-range review thread.
+
+<ParamField path="file" type="string" required>
+  File path
+</ParamField>
+
+<ParamField path="--start" type="number" required>
+  Start line number (1-based)
+</ParamField>
+
+<ParamField path="--end" type="number" optional>
+  End line number (defaults to start)
+</ParamField>
+
+<ParamField path="--side" type="string" default="RIGHT">
+  Diff side: `LEFT` (before) or `RIGHT` (after)
+</ParamField>
+
+<ParamField path="--body" type="string" required>
+  Comment text
+</ParamField>
+
+**Example (single line):**
+```bash
+gssh workspace review add-line src/auth.ts --start 15 --body "Add null check here"
+```
+
+**Example (line range):**
+```bash
+gssh workspace review add-line src/auth.ts --start 20 --end 25 --body "This block could be refactored"
+```
+
+**Example (left side of diff):**
+```bash
+gssh workspace review add-line src/auth.ts --start 10 --side LEFT --body "Old implementation was cleaner"
+```
+
+**Output:**
+```
+✓ Added line review thread for src/auth.ts:15-15 (RIGHT).
+```
+
+**JSON Output:**
+```json
+{
+  "ok": true,
+  "threadId": "thread-3",
+  "targetRef": "line:src/auth.ts:RIGHT:15-15",
+  "file": "src/auth.ts",
+  "side": "RIGHT",
+  "start": 15,
+  "end": 15
+}
+```
+
+---
+
+## Import GitHub Review
+
+```bash
+gssh workspace review import [--pr <number>] [--project <name>] [--workspace <name>]
+```
+
+Imports GitHub PR review comments as local threads.
+
+<ParamField path="--pr" type="number" optional>
+  PR number (auto-detected from branch if omitted)
+</ParamField>
+
+**Example:**
+```bash
+gssh workspace review import --pr 123
+```
+
+**Output:**
+```
+Importing GitHub PR review for myproject:feature-branch...
+✓ Imported 5 new thread(s) from GitHub (8 total).
+```
+
+<Note>
+  Requires `gh` CLI to be installed and authenticated.
+</Note>
+
+---
+
+## Push Review to GitHub
+
+```bash
+gssh workspace review push [--pr <number>] [--project <name>] [--workspace <name>]
+```
+
+Pushes local review decisions to GitHub as a formal PR review.
+
+<ParamField path="--pr" type="number" optional>
+  PR number (auto-detected from branch if omitted)
+</ParamField>
+
+**Example:**
+```bash
+gssh workspace review push --pr 123
+```
+
+**Output:**
+```
+Pushing review for myproject:feature-branch to GitHub...
+✓ Review submitted to GitHub: https://github.com/owner/repo/pull/123#pullrequestreview-456789
+```
+
+<Warning>
+  This publishes your review on GitHub. Make sure all comments and decisions are finalized.
+</Warning>
+
+---
+
+## Workspace Context Detection
+
+All review commands auto-detect project and workspace from:
+
+1. **Flags**: `--project` and `--workspace` (highest priority)
+2. **Environment**: `$GSSH_SPACE_PROJECT` and `$GSSH_SPACE_WORKSPACE`
+3. **Current directory**: Checks if cwd is inside a workspace
+4. **Global config**: Falls back to current project/workspace from config
+
+**Example (inside workspace):**
+```bash
+cd ~/gitspace/myproject/workspaces/feature-branch
+gssh workspace review notes  # Auto-detects myproject + feature-branch
+```
+
+**Example (from anywhere):**
+```bash
+gssh workspace review notes --project myproject --workspace feature-branch
+```
+
+---
+
+## Review Storage
+
+**Location:** `~/gitspace/<project>/workspaces/<workspace>/.review/`
+
+```
+.review/
+├── threads.json      # All review threads
+└── metadata.json     # Review session metadata
+```
+
+**threads.json format:**
+```json
+[
+  {
+    "id": "thread-1",
+    "target": {
+      "kind": "hunk",
+      "file": "src/auth.ts",
+      "hunkHeader": "@@ -10,5 +10,8 @@"
+    },
+    "decision": "approved",
+    "resolved": false,
+    "comments": [
+      {
+        "id": "comment-1",
+        "author": "local",
+        "body": "LGTM",
+        "createdAt": "2026-03-04T10:00:00.000Z"
+      }
+    ]
+  }
+]
+```
+
+---
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Workspace Context" icon="terminal" href="/cli/workspace/context">
+    View workspace context for review
+  </Card>
+  <Card title="GitHub Integration" icon="github" href="/integrations/github">
+    Sync reviews with GitHub PRs
+  </Card>
+</CardGroup>

@@ -1,0 +1,479 @@
+---
+title: "Linear Configuration"
+description: "Configure Linear integration for workspace creation"
+---
+
+## Overview
+
+GitSpace integrates with Linear to create workspaces directly from Linear issues. Configuration can be set at:
+
+- **User level**: API key and default teams (shared across all projects)
+- **Project level**: Project-specific teams or separate API key
+
+## Setup Command
+
+```bash
+gssh user config linear setup [--project <name>]
+```
+
+Runs the interactive Linear configuration wizard.
+
+<ParamField path="--project" type="string" optional>
+  Configure Linear for a specific project instead of user-level defaults
+</ParamField>
+
+---
+
+### User-Level Setup
+
+```bash
+gssh user config linear setup
+```
+
+**First-time setup:**
+
+1. Prompts for Linear API key
+2. Validates key against Linear API
+3. Fetches available teams
+4. Select teams you work with (multi-select)
+5. Choose default team
+6. Saves API key to system keychain
+7. Saves team config to `~/gitspace/.config.json`
+
+**Example:**
+```
+── Linear Integration Setup ──
+
+Enter your Linear API key (from Settings → API): ●●●●●●●●●●●●●●●●
+Validating API key...
+✓ API key valid
+Fetching teams...
+
+Select teams you work with:
+  ◉ ENG - Engineering
+  ◯ DES - Design
+  ◉ OPS - Operations
+
+Select your default team:
+  ENG - Engineering
+  OPS - Operations
+> ENG - Engineering
+
+✓ Linear configured (teams: ENG, OPS, default: ENG)
+
+Projects will inherit this config unless overridden.
+Run 'gssh user config linear setup --project <name>' to customize per-project.
+```
+
+**Re-configuration:**
+
+If already configured, you'll see a menu:
+
+```
+Linear is already configured:
+  API key: ●●●●●●●●●●●●1234
+  Teams: ENG, OPS (default: ENG)
+
+What would you like to do?
+> Update API key
+  Modify teams
+  Cancel
+```
+
+---
+
+### Project-Level Setup
+
+```bash
+gssh user config linear setup --project myproject
+```
+
+**Options:**
+
+1. **Use user-level API key** (recommended)
+   - Inherits API key from user config
+   - Select subset of teams for this project
+
+2. **Use project-specific API key**
+   - Enter different API key for this project
+   - Select teams available with that key
+   - Useful for team-specific Linear workspaces
+
+**Example (user key):**
+```
+── Linear Setup (Project: myproject) ──
+
+Which API key would you like to use?
+> Use user-level API key
+  Use project-specific API key
+  Cancel
+
+Select teams for 'myproject':
+  ◉ ENG - Engineering
+  ◯ OPS - Operations
+
+✓ Project 'myproject' will use: ENG
+```
+
+**Example (project key):**
+```
+Enter Linear API key for this project: ●●●●●●●●●●●●●●●●
+Validating API key...
+✓ API key valid
+Fetching teams...
+
+Select teams for 'myproject':
+  ◉ DES - Design
+  ◉ MKT - Marketing
+
+Select your default team:
+> DES - Design
+
+✓ Project 'myproject' configured with its own API key (teams: DES, MKT)
+```
+
+<Note>
+  Project-specific API keys are stored in keychain as `gitspace-linear-<project>`.
+</Note>
+
+---
+
+## Show Command
+
+```bash
+gssh user config linear show [--project <name>]
+```
+
+Displays current Linear configuration.
+
+<ParamField path="--project" type="string" optional>
+  Show project-specific configuration
+</ParamField>
+
+---
+
+### User-Level Configuration
+
+```bash
+gssh user config linear show
+```
+
+**Example Output:**
+```
+── Linear Configuration (User) ──
+
+  API key: ●●●●●●●●●●●●1234
+  Teams:
+    - ENG - Engineering (default)
+    - OPS - Operations
+```
+
+**Not configured:**
+```
+── Linear Configuration (User) ──
+
+  Status: Not configured
+
+  Run 'gssh user config linear setup' to configure
+```
+
+---
+
+### Project-Level Configuration
+
+```bash
+gssh user config linear show --project myproject
+```
+
+**Example Output (inherits user config):**
+```
+── Linear Configuration (Project: myproject) ──
+
+  API key: ●●●●●●●●●●●●1234 (from user config)
+  Teams: ENG (inherited from user config)
+```
+
+**Example Output (project-specific):**
+```
+── Linear Configuration (Project: myproject) ──
+
+  API key: ●●●●●●●●●●●●5678 (project-specific)
+  Teams: DES, MKT
+```
+
+**Legacy warning:**
+```
+── Linear Configuration (Project: myproject) ──
+
+  API key: ●●●●●●●●●●●●1234 (from user config)
+  Teams: ENG
+
+  ⚠ Legacy config detected (linearApiKey in project config)
+  Run 'gssh user config linear setup --project' to migrate
+```
+
+---
+
+## Clear Command
+
+```bash
+gssh user config linear clear [--project <name>]
+```
+
+Removes Linear configuration.
+
+<ParamField path="--project" type="string" optional>
+  Clear project-specific configuration instead of user-level
+</ParamField>
+
+---
+
+### User-Level Clear
+
+```bash
+gssh user config linear clear
+```
+
+**Confirmation:**
+```
+Clear user-level Linear configuration (API key and teams)? (y/N): y
+✓ Linear configuration cleared
+```
+
+**Effect:**
+- Removes API key from keychain (`gitspace-linear`)
+- Clears `linearTeams` and `linearDefaultTeam` from `~/gitspace/.config.json`
+- Projects using user-level config will no longer have Linear integration
+
+---
+
+### Project-Level Clear
+
+```bash
+gssh user config linear clear --project myproject
+```
+
+**With project-specific key:**
+```
+Clear Linear configuration for project 'myproject' (including project-specific API key)? (y/N): y
+✓ Linear configuration cleared for project 'myproject'
+Project will now use user-level defaults
+```
+
+**Without project-specific key:**
+```
+Clear Linear configuration for project 'myproject'? (y/N): y
+✓ Linear configuration cleared for project 'myproject'
+Project will now use user-level defaults
+```
+
+**Effect:**
+- Removes project-specific API key from keychain (if set)
+- Clears `linearTeams` from `~/gitspace/<project>/.config.json`
+- Project reverts to user-level Linear configuration
+
+---
+
+## Configuration Files
+
+### User Config
+
+**Location:** `~/gitspace/.config.json`
+
+```json
+{
+  "linearTeams": [
+    { "id": "team-id-1", "key": "ENG", "name": "Engineering" },
+    { "id": "team-id-2", "key": "OPS", "name": "Operations" }
+  ],
+  "linearDefaultTeam": "ENG"
+}
+```
+
+### Project Config
+
+**Location:** `~/gitspace/<project>/.config.json`
+
+```json
+{
+  "linearTeams": ["ENG", "DES"]
+}
+```
+
+<Note>
+  Project config stores only team **keys**, not full team info. Full details are fetched from user config or Linear API.
+</Note>
+
+### Keychain Secrets
+
+**User API Key:**
+- Secret name: `gitspace-linear`
+- Storage: System keychain (macOS Keychain, Linux Secret Service, etc.)
+
+**Project API Key:**
+- Secret name: `gitspace-linear-<project-name>`
+- Storage: System keychain
+
+<Warning>
+  API keys are never stored in plain text. They're managed via `Bun.secrets` which uses the system keychain.
+</Warning>
+
+---
+
+## Configuration Resolution
+
+When creating a workspace from a Linear issue, GitSpace resolves config in this order:
+
+1. **Project-specific API key** (if set)
+2. **User-level API key** (if set)
+3. **Error** (no API key configured)
+
+Team selection:
+
+1. **Project-level team filter** (if set)
+2. **User-level default teams** (if set)
+3. **All teams** (if no filter)
+
+**Example:**
+
+```
+User config:
+  Teams: ENG, OPS, DES (default: ENG)
+
+Project "backend":
+  Teams: ENG, OPS
+
+Project "frontend":
+  (no override)
+
+Result:
+  - backend workspace → ENG or OPS issues only
+  - frontend workspace → ENG, OPS, or DES issues
+```
+
+---
+
+## Getting a Linear API Key
+
+1. Log in to [Linear](https://linear.app)
+2. Go to **Settings** → **API** → **Personal API keys**
+3. Click **Create key**
+4. Copy the key (starts with `lin_api_...`)
+5. Run `gssh user config linear setup`
+6. Paste the key when prompted
+
+<Warning>
+  Personal API keys have full access to your Linear workspace. Keep them secure and never commit to version control.
+</Warning>
+
+---
+
+## Common Workflows
+
+### Initial setup for all projects
+
+```bash
+# Configure user-level Linear
+gssh user config linear setup
+
+# All projects now inherit this config
+```
+
+### Per-project team filtering
+
+```bash
+# Set up user config with all teams
+gssh user config linear setup
+# Select: ENG, DES, OPS
+
+# Restrict backend project to ENG only
+gssh user config linear setup --project backend
+# Select: ENG
+
+# Frontend uses default (all teams)
+```
+
+### Multiple Linear workspaces
+
+```bash
+# User config for company workspace
+gssh user config linear setup
+# API key: lin_api_company_...
+
+# Client project with their Linear workspace
+gssh user config linear setup --project client-project
+# Choose: Use project-specific API key
+# API key: lin_api_client_...
+```
+
+### Migrate from legacy config
+
+If you see the legacy warning:
+
+```bash
+gssh user config linear show --project myproject
+# ⚠ Legacy config detected
+
+gssh user config linear setup --project myproject
+# Re-run setup to migrate
+```
+
+---
+
+## Troubleshooting
+
+### "Invalid Linear API key"
+
+The key failed validation against Linear's API.
+
+**Solutions:**
+1. Verify the key in Linear settings
+2. Check for extra spaces when pasting
+3. Generate a new key if expired
+
+### "No teams found for this API key"
+
+Your Linear account has no teams.
+
+**Solutions:**
+1. Join a team in Linear
+2. Create a new team
+3. Verify you're using the correct workspace
+
+### API key not found in keychain
+
+Keychain access may be denied.
+
+**Solutions:**
+```bash
+# Check keychain access
+bun --eval "console.log(Bun.secrets.get('gitspace-linear'))"
+
+# Re-run setup
+gssh user config linear setup
+```
+
+### Project config not applying
+
+Verify project name:
+
+```bash
+# List projects
+gssh project list
+
+# Check project config
+gssh user config linear show --project <exact-name>
+```
+
+---
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Linear Integration" icon="link" href="/integrations/linear">
+    Using Linear issues to create workspaces
+  </Card>
+  <Card title="Workspace Creation" icon="plus" href="/cli/workspace/add">
+    Creating workspaces from Linear issues
+  </Card>
+</CardGroup>

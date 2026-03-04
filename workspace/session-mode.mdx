@@ -1,0 +1,520 @@
+---
+title: Workspace Session Mode
+description: Understanding workspace sessions and the space command
+---
+
+## Overview
+
+When GitSpace opens a workspace terminal, it enters **workspace session mode**. This mode provides:
+
+- **Automatic context**: Project and workspace names are inferred from environment
+- **`space` function**: Simplified workspace-scoped commands
+- **Restricted operations**: Prevents accidental cross-workspace actions
+- **Session hooks**: Custom scripts that run on attach/detach
+
+## Session Environment
+
+### Environment Variables
+
+Workspace sessions set these environment variables:
+
+```bash
+GSSH_SESSION_MODE=workspace
+GSSH_SPACE_PROJECT=my-app
+GSSH_SPACE_WORKSPACE=my-feature
+GSSH_SESSION_ID=my-app:my-feature:1704067200000
+```
+
+<Note>
+These variables are automatically set by tmux-lite when spawning workspace sessions.
+</Note>
+
+### Shell Integration
+
+The `space` function is injected for bash and zsh shells:
+
+```bash
+# Check if in session mode
+if [ "$GSSH_SESSION_MODE" = "workspace" ]; then
+  echo "In workspace: $GSSH_SPACE_WORKSPACE"
+fi
+```
+
+## The `space` Command
+
+### Purpose
+
+The `space` command is a workspace-scoped wrapper that:
+- Automatically passes `--project` and `--workspace` flags
+- Provides cleaner syntax for workspace operations
+- Only works inside workspace sessions
+
+### Available Commands
+
+<Tabs>
+  <Tab title="Context">
+    ### Show Workspace Context
+
+    ```bash
+    space context
+    ```
+
+    Output (human-readable):
+    ```
+    Project: my-app
+    Workspace: my-feature
+    Path: /home/user/gitspace/my-app/workspaces/my-feature
+    Repository: myorg/my-app
+    Branch: my-feature
+    ```
+
+    JSON output:
+    ```bash
+    space context --json
+    ```
+
+    ```json
+    {
+      "project": "my-app",
+      "workspace": "my-feature",
+      "workspacePath": "/home/user/gitspace/my-app/workspaces/my-feature",
+      "repository": "myorg/my-app",
+      "branch": "my-feature"
+    }
+    ```
+  </Tab>
+
+  <Tab title="Review">
+    ### Code Review Commands
+
+    List review threads:
+    ```bash
+    space review notes
+    space review notes --format json
+    ```
+
+    List hunks in a file:
+    ```bash
+    space review hunks src/app.ts
+    space review hunks src/app.ts --format json
+    ```
+
+    Add hunk review:
+    ```bash
+    space review add-hunk src/app.ts --index 1 --approve
+    space review add-hunk src/app.ts --index 2 --reject --body "Needs refactoring"
+    ```
+
+    Add file review:
+    ```bash
+    space review add-file src/app.ts --body "Good implementation"
+    ```
+
+    Add line review:
+    ```bash
+    space review add-line src/app.ts --start 10 --end 15 --body "Consider using async/await"
+    ```
+
+    Import/push reviews:
+    ```bash
+    space review import --pr 123
+    space review push --pr 123
+    ```
+  </Tab>
+
+  <Tab title="Process">
+    ### Process Management
+
+    List processes:
+    ```bash
+    space process list
+    ```
+
+    Start/stop processes:
+    ```bash
+    space process start --name dev-server
+    space process stop --name dev-server
+    ```
+
+    Attach to process:
+    ```bash
+    space process attach --name dev-server
+    ```
+  </Tab>
+
+  <Tab title="Events">
+    ### Event Logs
+
+    List events:
+    ```bash
+    space events list
+    space events list --filter type=command
+    space events list --limit 50
+    ```
+
+    Show event:
+    ```bash
+    space events show --filter eventId=abc123
+    ```
+
+    Tail events:
+    ```bash
+    space events tail
+    space events tail --limit 20
+    ```
+  </Tab>
+
+  <Tab title="Bundle">
+    ### Bundle Configuration
+
+    Show bundle status:
+    ```bash
+    space bundle status
+    ```
+
+    Refresh bundle:
+    ```bash
+    space bundle refresh
+    space bundle refresh --force
+    ```
+  </Tab>
+</Tabs>
+
+## Restricted Commands
+
+In workspace session mode, certain global commands are blocked:
+
+### Blocked Operations
+
+```bash
+# ❌ Project management
+gssh project add
+gssh project remove
+gssh project list
+
+# ❌ Cross-workspace operations
+gssh workspace add --project other-project
+gssh workspace remove --project other-project
+
+# ❌ Global tmux operations
+gssh machine tmux list
+gssh machine tmux start
+```
+
+### Why Restrictions?
+
+Restrictions prevent:
+- Accidentally creating workspaces in wrong projects
+- Removing workspaces while inside them
+- Confusion about which workspace is active
+
+<Warning>
+Always exit workspace sessions before performing global operations. Press `Shift+Esc` to detach.
+</Warning>
+
+## Session Lifecycle
+
+### Entering Session Mode
+
+<Steps>
+  <Step title="TUI Launch">
+    ```bash
+    gssh
+    # Navigate to workspace
+    # Press Enter to open
+    ```
+
+    GitSpace will:
+    1. Check if scripts need to run (setup/select)
+    2. Execute scripts in order
+    3. Create or attach to tmux-lite session
+    4. Inject `space` function
+    5. Set environment variables
+  </Step>
+
+  <Step title="CLI Launch">
+    ```bash
+    gssh workspace session new --project my-app --workspace my-feature
+    ```
+
+    Or attach existing:
+    ```bash
+    gssh workspace session attach --session <id> --project my-app --workspace my-feature
+    ```
+  </Step>
+</Steps>
+
+### Session Scripts
+
+<CodeGroup>
+```bash Setup (Once)
+# .gitspace/scripts/setup/01-install-deps.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Setting up $WORKSPACE_NAME..."
+npm install
+npm run build
+
+# Runs when:
+# - Workspace created
+# - Bundle config changed
+# - Manual refresh
+```
+
+```bash Select (Every Attach)
+# .gitspace/scripts/select/01-git-status.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Workspace: $WORKSPACE_NAME"
+git fetch --quiet
+git status --short
+
+# Runs every time you:
+# - Attach to session
+# - Switch to workspace
+```
+</CodeGroup>
+
+### Exiting Session Mode
+
+Detach from session:
+
+**In TUI:**
+```
+Press Shift+Esc to detach and return to TUI
+```
+
+**In CLI:**
+```
+Ctrl+A, then D (tmux-lite detach)
+```
+
+The session continues running in the background. You can reattach later.
+
+## Session Management
+
+### List Active Sessions
+
+```bash
+gssh machine tmux list
+```
+
+Output:
+```
+Active sessions:
+  my-app:my-feature:1704067200000
+  my-app:another-feature:1704070800000
+  backend:api-refactor:1704074400000
+```
+
+### Create Session
+
+```bash
+# Auto-generated name (timestamp)
+gssh workspace session new --project my-app --workspace my-feature
+
+# Custom name
+gssh workspace session new debug --project my-app --workspace my-feature
+```
+
+Session naming:
+```
+<project>:<workspace>:<session-name>
+```
+
+### Attach to Session
+
+```bash
+gssh workspace session attach \
+  --session my-app:my-feature:1704067200000 \
+  --project my-app \
+  --workspace my-feature
+```
+
+### Kill Session
+
+```bash
+gssh machine tmux kill my-app:my-feature:1704067200000
+```
+
+<Warning>
+Killing a session terminates all processes running in it. Detach instead to preserve state.
+</Warning>
+
+## Advanced Usage
+
+### Multiple Sessions
+
+Run multiple sessions in the same workspace:
+
+```bash
+# Terminal 1: Development server
+gssh workspace session new dev-server --project my-app --workspace my-feature
+space process start --name dev-server
+
+# Terminal 2: Database console
+gssh workspace session new db-console --project my-app --workspace my-feature
+psql myapp_dev
+
+# Terminal 3: Tests
+gssh workspace session new tests --project my-app --workspace my-feature
+npm run test:watch
+```
+
+### Script Environment
+
+Scripts have access to session context:
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/select/01-status.sh
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+# Session variables available
+echo "Session mode: $GSSH_SESSION_MODE"
+echo "Session ID: $GSSH_SESSION_ID"
+
+# Bundle values available
+if [ -n "$TEAM_NAME" ]; then
+  echo "Team: $TEAM_NAME"
+fi
+
+# Show git status
+git status --short
+```
+
+### JSON Output for AI
+
+Many `space` commands support `--json` for AI/LLM integration:
+
+```bash
+# Get structured context
+space context --json | jq '.workspace'
+
+# Get review notes
+space review notes --format json | jq '.threads'
+
+# Get hunks for analysis
+space review hunks src/app.ts --format json | jq '.hunks[0]'
+```
+
+## Examples
+
+<CodeGroup>
+```bash Basic Workflow
+# Launch TUI
+gssh
+
+# Navigate to workspace and press Enter
+# Now in workspace session mode
+
+# Check context
+space context
+
+# View review notes
+space review notes
+
+# Add approval
+space review add-hunk src/app.ts --index 1 --approve
+
+# Exit
+Shift+Esc (or Ctrl+D)
+```
+
+```bash CLI Workflow
+# Create session
+gssh workspace session new --project my-app --workspace my-feature
+
+# In session:
+space context --json
+space review hunks src/app.ts
+space review add-hunk src/app.ts --index 2 --approve --body "LGTM"
+
+# Detach (Ctrl+A, D)
+# Session continues running
+
+# Reattach later
+gssh machine tmux list
+gssh workspace session attach --session <id> --project my-app --workspace my-feature
+```
+
+```bash Multi-Session
+# Terminal 1: Dev server
+gssh workspace session new dev --project my-app --workspace my-feature
+space process start --name dev-server
+
+# Terminal 2: Console
+gssh workspace session new console --project my-app --workspace my-feature
+node
+
+# Terminal 3: Logs
+gssh workspace session new logs --project my-app --workspace my-feature
+space events tail
+```
+</CodeGroup>
+
+## Troubleshooting
+
+### Not in Session Mode
+
+```bash
+$ space context
+Error: Not inside a workspace session.
+Space commands are only available in workspace session mode.
+```
+
+**Solution:** Open a workspace session first:
+```bash
+gssh  # Launch TUI and open workspace
+# or
+gssh workspace session new --project my-app --workspace my-feature
+```
+
+### Missing Context
+
+```bash
+$ space context
+Error: Workspace session context is missing.
+```
+
+**Solution:** Ensure environment variables are set:
+```bash
+echo $GSSH_SESSION_MODE
+echo $GSSH_SPACE_PROJECT
+echo $GSSH_SPACE_WORKSPACE
+```
+
+If empty, you're not in a proper workspace session.
+
+### Restricted Command Error
+
+```bash
+$ gssh project add
+Error: This command is restricted in workspace session mode.
+```
+
+**Solution:** Exit the workspace session first:
+```
+Shift+Esc (in TUI)
+or
+Ctrl+D (in CLI)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Workspaces" icon="plus" href="/workspace/creating">
+    Learn how to create workspaces
+  </Card>
+  <Card title="Switching Workspaces" icon="arrow-right-arrow-left" href="/workspace/switching">
+    Navigate between workspaces and sessions
+  </Card>
+</CardGroup>

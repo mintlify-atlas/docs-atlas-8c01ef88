@@ -1,0 +1,398 @@
+---
+title: 'Using the Interactive TUI'
+description: 'Master the GitSpace terminal user interface with keyboard navigation, panels, and workflows'
+icon: 'terminal'
+---
+
+# Using the Interactive TUI
+
+GitSpace features a powerful Terminal User Interface (TUI) built with OpenTUI that provides a visual, keyboard-driven way to manage your projects and workspaces.
+
+## Launching the TUI
+
+Simply run `gssh` with no arguments:
+
+```bash
+gssh
+```
+
+The TUI provides a two-panel interface:
+- **Left panel**: Your projects
+- **Right panel**: Workspaces in the selected project
+
+## Keyboard Bindings
+
+### Global Shortcuts
+
+These shortcuts work from any view:
+
+| Key | Action |
+|-----|--------|
+| `?` | Show help / keyboard shortcuts |
+| `q` or `Ctrl+C` | Quit the TUI |
+| `i` | Open inbox (notifications) |
+| `,` | Open settings |
+| `Shift+Tab` | Attach to active notification (when notification is visible) |
+
+### Navigation
+
+Move through lists and menus:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Move up |
+| `↓` / `j` | Move down |
+| `Enter` | Select / Activate item |
+| `Esc` | Cancel / Go back |
+| `Tab` | Switch between panels |
+
+### Project Panel Actions
+
+When focused on the projects panel:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Select project (switch to workspace panel) |
+| `n` | Create new project |
+| `d` | Delete selected project |
+| `r` | Refresh project list |
+
+### Workspace Panel Actions
+
+When focused on the workspaces panel:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Expand workspace / Attach to session |
+| `n` | Create new workspace |
+| `d` | Delete selected workspace |
+| `r` | Refresh workspace list |
+| `Tab` | Switch back to projects panel |
+
+### Modal Dialogs
+
+When a confirmation or input dialog is open:
+
+| Key | Action |
+|-----|--------|
+| `y` | Yes (confirm) |
+| `n` or `Esc` | No (cancel) |
+| `Enter` | Submit / Continue |
+| `Backspace` | Delete character (text input) |
+
+## Panel Views
+
+### Main View (Projects & Workspaces)
+
+The default view shows:
+
+<Steps>
+  <Step title="Projects Panel (Left)">
+    Lists all your GitHub repository projects with:
+    - Project name
+    - Repository URL
+    - Number of workspaces
+    - Current project indicator (highlighted)
+  </Step>
+
+  <Step title="Workspaces Panel (Right)">
+    Shows workspaces for the selected project:
+    - Workspace name and branch
+    - Session count
+    - Stale indicator (if inactive for 30+ days)
+    - Process status (when expanded)
+  </Step>
+</Steps>
+
+### Expanded Workspace View
+
+When you press `Enter` on a workspace, it expands to show:
+
+1. **Running Processes** (from `.gitspace/processes.json`):
+   - Process name and instance number
+   - Status: running / stopped / failed
+   - Port information (if configured)
+   - Press `Enter` to attach to a running process
+
+2. **Ad-hoc Sessions**:
+   - Interactive terminal sessions
+   - Session name and creation time
+   - Attached status
+
+3. **Actions**:
+   - **Edit Processes**: Opens `.gitspace/processes.json` in your editor
+   - **Events**: View workspace event logs
+   - **New Session**: Create a new terminal session
+
+### Inbox View
+
+Press `i` to view notifications:
+
+- Session exit notifications
+- Process crashes
+- Terminal bell notifications
+- Workspace events
+
+<Tabs>
+  <Tab title="Navigation">
+    - `↑` / `↓` or `j` / `k` to browse notifications
+    - `Enter` to jump to the related session
+    - `d` to dismiss a notification
+    - `c` to clear all notifications
+    - `Esc` or `q` to close inbox
+  </Tab>
+  <Tab title="Auto-Attach">
+    When a new notification appears:
+    - A toast appears in the top-right corner
+    - Press `Shift+Tab` to immediately attach to that session
+    - Useful for quickly checking on background processes
+  </Tab>
+</Tabs>
+
+### Events View
+
+Press `Enter` on "Events" in an expanded workspace to view:
+
+- Real-time event stream (process output, system events)
+- Filter by event type (stdout, stderr, process lifecycle)
+- Live tail mode (auto-scroll to latest)
+- Saved filter presets
+
+**Keyboard shortcuts:**
+- `↑` / `↓` or `j` / `k` to scroll events
+- `Esc` or `q` to close events view
+
+### Terminal View
+
+When you attach to a session:
+
+- Full terminal emulator with xterm.js
+- All keyboard input is forwarded to the session
+- `Ctrl+D` or `exit` to detach from session
+- Terminal state is preserved (you can reattach later)
+
+<Note>
+While in terminal view, only `Shift+Tab` (for notifications) is intercepted. All other keys are sent to the terminal.
+</Note>
+
+### Script Execution View
+
+When creating a workspace or running lifecycle scripts:
+
+- Real-time script output in a read-only terminal
+- Progress indicator
+- Script name and phase shown
+- Press `c` to cancel running scripts
+- Press `a` to attach anyway (skip scripts) if they fail
+- Press `Esc` or `n` to abort and return to main view
+
+## Workflows
+
+### Creating a Project
+
+<Steps>
+  <Step title="Open Create Flow">
+    Press `n` in the projects panel to start the project creation wizard.
+  </Step>
+
+  <Step title="Select Repository">
+    Choose from your GitHub repositories using `↑` / `↓` and `Enter`.
+    
+    GitSpace will:
+    - Clone the repository to `~/gitspace/<project-name>/base`
+    - Detect the default branch
+    - Look for a `.gitspace/bundle.json` file
+  </Step>
+
+  <Step title="Complete Onboarding (if bundle exists)">
+    If a bundle is detected, you'll go through onboarding steps:
+    - **Info**: Press `Enter` to continue
+    - **Confirm**: Checks if required tools are installed (e.g., Node.js)
+    - **Input**: Enter configuration values
+    - **Secret**: Enter sensitive values (masked, stored in OS keychain)
+  </Step>
+
+  <Step title="Project Created">
+    The project is added to your list and automatically selected.
+  </Step>
+</Steps>
+
+### Creating a Workspace
+
+<Steps>
+  <Step title="Select Project">
+    Use the projects panel to select which project to work in.
+  </Step>
+
+  <Step title="Open Create Flow">
+    Press `n` in the workspaces panel.
+  </Step>
+
+  <Step title="Choose Creation Method">
+    Select from:
+    - **From Linear Issue**: Choose a Linear issue to create a workspace
+    - **From Remote Branch**: Select an existing remote branch
+    - **New Branch**: Enter a custom workspace name
+  </Step>
+
+  <Step title="Setup Scripts Run">
+    GitSpace executes setup scripts from `.gitspace/scripts/setup/`:
+    - Scripts run in alphabetical order
+    - Real-time output is shown
+    - Bundle values are available as environment variables
+    - Press `c` to cancel if needed
+  </Step>
+
+  <Step title="Workspace Ready">
+    The workspace is created and automatically attached in a new terminal session.
+  </Step>
+</Steps>
+
+### Deleting a Workspace
+
+<Steps>
+  <Step title="Select Workspace">
+    Navigate to the workspace you want to delete.
+  </Step>
+
+  <Step title="Confirm Deletion">
+    Press `d` and type the workspace name to confirm.
+    
+    <Warning>
+    If the workspace has active sessions, they will be killed!
+    </Warning>
+  </Step>
+
+  <Step title="Removal Scripts Run">
+    Scripts in `.gitspace/scripts/remove/` execute before deletion:
+    - Cleanup tasks
+    - Notifications
+    - Resource teardown
+  </Step>
+
+  <Step title="Workspace Deleted">
+    The git worktree and workspace directory are removed.
+  </Step>
+</Steps>
+
+## Settings
+
+Press `,` to open settings and configure:
+
+### Notification Preferences
+
+- **Toast Duration**: How long notifications stay visible (in seconds)
+- **Hold When Idle**: Extended duration when you're not actively typing (in seconds)
+- **Notification Types**: Enable/disable specific notification types
+  - Exit (process/session exits)
+  - Idle (no activity detection)
+  - Bell (terminal bell character)
+  - Title (terminal title changes)
+  - OSC (operating system commands)
+
+<Tabs>
+  <Tab title="Navigate Settings">
+    - `↑` / `↓` or `j` / `k` to browse options
+    - `Enter` to toggle or edit value
+    - `Esc` to close settings
+  </Tab>
+  <Tab title="Edit Duration">
+    - Type numbers directly
+    - `Enter` to save
+    - `Backspace` to delete
+  </Tab>
+</Tabs>
+
+## Tips & Tricks
+
+### Quick Session Switching
+
+When a notification toast appears (top-right corner):
+1. Press `Shift+Tab` to immediately attach to that session
+2. Useful for checking background processes without navigating menus
+
+### Vim-Style Navigation
+
+All list navigation supports Vim keybindings:
+- `j` = down
+- `k` = up
+
+This works in all list views (projects, workspaces, events, settings).
+
+### Process Management
+
+For workspaces with `.gitspace/processes.json`:
+1. Expand the workspace to see process instances
+2. **Running processes** show a green indicator
+3. Press `Enter` on a process to:
+   - Attach to running instance (view-only)
+   - Start stopped instance
+
+### Terminal Persistence
+
+Sessions persist even after you detach:
+1. Attach to a workspace
+2. Start a long-running process (e.g., dev server)
+3. Detach with `Ctrl+D` or `exit`
+4. The session keeps running in the background
+5. Reattach later to see output
+
+### Workspace Expansion State
+
+The TUI remembers which workspaces you've expanded:
+- Expanding a workspace loads its sessions
+- Sessions auto-refresh while expanded
+- Collapse to hide sessions and reduce clutter
+
+## Troubleshooting
+
+### Input Not Working
+
+If keyboard input seems delayed or broken:
+
+<Accordion title="Check Kitty Keyboard Protocol">
+  GitSpace supports the Kitty keyboard protocol for better key handling. If your terminal doesn't support it:
+  
+  1. The TUI auto-detects and falls back to VT mode
+  2. Check the bottom-right status bar: `kbd: kitty` or `kbd: vt`
+  3. Most modern terminals (kitty, WezTerm, iTerm2) support Kitty mode
+</Accordion>
+
+<Accordion title="Scripts Hanging">
+  If setup scripts appear to hang:
+  
+  1. Press `c` to cancel script execution
+  2. Scripts should not prompt for interactive input (they run in non-interactive mode)
+  3. Check your scripts for `read` commands or interactive prompts
+  4. Use bundle onboarding steps for user input instead
+</Accordion>
+
+### Modal Dialogs Not Closing
+
+If a confirmation dialog is stuck:
+- Press `Esc` to cancel
+- Press `Ctrl+C` to force quit the entire TUI
+- Check for async operations in progress
+
+### Visual Glitches
+
+If the UI looks corrupted:
+1. Try resizing your terminal window (TUI auto-adjusts)
+2. Ensure your terminal supports 256 colors
+3. Check `$TERM` environment variable (should be `xterm-256color` or similar)
+
+## Remote Mode
+
+When connecting to a remote machine:
+
+```bash
+gssh client connect <machine-id>
+```
+
+The TUI shows:
+1. **Machine List**: Available remote machines
+2. **Connect**: Press `Enter` to connect
+3. **Projects/Workspaces**: Same interface as local mode
+4. **E2E Encryption**: All terminal I/O is encrypted
+
+Remote mode keyboard shortcuts are identical to local mode.

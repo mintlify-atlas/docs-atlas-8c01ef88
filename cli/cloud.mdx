@@ -1,0 +1,434 @@
+---
+title: "Cloud Commands"
+description: "Manage cloud-hosted GitSpace workspaces"
+---
+
+## Overview
+
+Cloud commands manage remote GitSpace workspaces running on cloud VMs (Sprites.dev). These commands require:
+
+- User root identity (`gssh user identity init`)
+- Active serve daemon (`gssh machine serve start`)
+- Sprites.dev API token (`gssh cloud setup`)
+
+<Warning>
+  Cloud commands are experimental and require the serve daemon to be running for control operations.
+</Warning>
+
+---
+
+## Setup
+
+### Configure Cloud Provider
+
+```bash
+gssh cloud setup
+```
+
+Prompts for Sprites.dev API token and saves it to system keychain.
+
+**Example:**
+```
+Cloud Provider Setup
+
+  Current Sprites token: (not set)
+
+Enter your Sprites.dev API token: ●●●●●●●●●●●●●●●●
+
+  ✓ Sprites token saved to keychain.
+
+  Run `gssh cloud status` to verify the control setup.
+```
+
+**Getting a Sprites token:**
+1. Sign up at [sprites.dev](https://sprites.dev)
+2. Go to API settings
+3. Generate a new API token
+4. Copy and paste into the setup prompt
+
+---
+
+### Clear Cloud Configuration
+
+```bash
+gssh cloud setup clear
+```
+
+Removes Sprites token from keychain.
+
+**Example:**
+```
+  ✓ Sprites token cleared from keychain.
+```
+
+---
+
+## Status
+
+### Show Cloud Control Status
+
+```bash
+gssh cloud status
+```
+
+Displays control metadata, relay binding, and ownership.
+
+**Example:**
+```
+Cloud Control Status
+
+  Serve PID:     12345
+  Relay:         wss://myworkspace.gitspace.sh/ws
+  Relay status:  connected
+  ✓ Control mode:  active
+  Schema:        v1
+  Owner ID:      gssh-user:abc123...
+  Relay ID:      gssh-relay:xyz789...
+  Relay FP:      relay:ABCD1234...
+  Updated:       2026-03-04T10:30:00.000Z
+  Local owner root: gssh-user:abc123...
+  Owner access:    yes
+```
+
+**Not configured:**
+```
+Cloud Control Status
+
+  Serve PID:     12345
+  Relay:         wss://relay.example.com/ws
+  Relay status:  connected
+  ⚠ Control mode:  unavailable (no control metadata)
+```
+
+<Note>
+  Control mode requires serve daemon to be running. Start with `gssh machine serve start`.
+</Note>
+
+---
+
+## Launch Workspace
+
+### Create Cloud Workspace
+
+```bash
+gssh cloud launch --repo <owner/repo> [--branch <name>] [--image <image>]
+```
+
+Launches a new cloud workspace VM.
+
+<ParamField path="--repo" type="string" required>
+  GitHub repository (format: `owner/repo`)
+</ParamField>
+
+<ParamField path="--branch" type="string" default="main">
+  Git branch to check out
+</ParamField>
+
+<ParamField path="--image" type="string" optional>
+  Custom Sprites VM image (defaults to provider's default)
+</ParamField>
+
+**Example:**
+```bash
+gssh cloud launch --repo myorg/backend --branch feature/auth
+```
+
+**Output:**
+```
+  Relay URL:  wss://myworkspace.gitspace.sh/ws
+  Relay FP:   relay:ABCD1234...
+
+Launching Cloud Workspace
+
+  Workspace:  ws-a1b2c3d4
+  Repo:       myorg/backend
+  Branch:     feature/auth
+
+  Creating Sprites VM...
+
+  ✓ Workspace launched: ws-a1b2c3d4
+  Sprite ID:          sprite-xyz789...
+  Bootstrap token ID: boot-token-123...
+  Bootstrap expires:  2026-03-04T11:00:00.000Z
+  Enroll invite ID:   invite-456...
+  Enroll expires:     2026-03-04T11:00:00.000Z
+  Status:             bootstrapping
+
+  The VM should bootstrap and connect back to the relay using the one-time token.
+  Run `gssh cloud list` to track progress.
+```
+
+**Workflow:**
+
+1. Creates workspace identity and escrows keys
+2. Generates bootstrap token (30min expiry)
+3. Creates relay enrollment invite
+4. Calls Sprites API to create VM
+5. Writes bootstrap bundle to VM
+6. Executes bootstrap command via Sprites exec
+7. VM starts `gssh machine serve` and enrolls with relay
+
+<Note>
+  The bootstrap process runs automatically in the VM. You can monitor progress with `gssh cloud list`.
+</Note>
+
+---
+
+## List Workspaces
+
+### Show All Cloud Workspaces
+
+```bash
+gssh cloud list
+```
+
+Lists all cloud workspaces owned by your identity.
+
+**Example:**
+```
+Cloud Workspaces
+
+  ws-a1b2c3d4
+    Provider: sprites
+    Status:   ready
+    Repo:     myorg/backend
+    Branch:   feature/auth
+    Updated:  2026-03-04T10:35:00.000Z
+
+  ws-e5f6g7h8
+    Provider: sprites
+    Status:   bootstrapping
+    Repo:     myorg/frontend
+    Branch:   main
+    Updated:  2026-03-04T10:40:00.000Z
+
+  ws-i9j0k1l2
+    Provider: sprites
+    Status:   error
+    Repo:     myorg/api
+    Branch:   develop
+    Updated:  2026-03-04T09:15:00.000Z
+    ⚠ Error:    Bootstrap command failed: exit code 127
+```
+
+**Status values:**
+- `bootstrapping`: VM is starting and enrolling with relay
+- `ready`: VM is connected and accessible
+- `stopped`: VM is stopped (can be resumed)
+- `error`: VM encountered an error during bootstrap or operation
+
+---
+
+## Stop Workspace
+
+### Stop a Running Cloud Workspace
+
+```bash
+gssh cloud stop <workspace-id>
+```
+
+Stops the cloud workspace VM (can be resumed later).
+
+<ParamField path="workspace-id" type="string" required>
+  Workspace ID (from `gssh cloud list`)
+</ParamField>
+
+**Example:**
+```bash
+gssh cloud stop ws-a1b2c3d4
+```
+
+**Output:**
+```
+Stopping workspace ws-a1b2c3d4...
+
+  ✓ Workspace ws-a1b2c3d4 stopped (status: stopped).
+```
+
+<Note>
+  Stopped VMs do not incur compute costs but storage may still be billed by the provider.
+</Note>
+
+---
+
+## Resume Workspace
+
+### Restart a Stopped Cloud Workspace
+
+```bash
+gssh cloud resume <workspace-id>
+```
+
+Resumes a stopped workspace and re-enrolls with relay.
+
+<ParamField path="workspace-id" type="string" required>
+  Workspace ID (from `gssh cloud list`)
+</ParamField>
+
+**Example:**
+```bash
+gssh cloud resume ws-a1b2c3d4
+```
+
+**Output:**
+```
+Resuming workspace ws-a1b2c3d4...
+
+  ✓ Workspace ws-a1b2c3d4 resumed (status: bootstrapping).
+  Unlock token ID:    unlock-token-789...
+  Enroll invite ID:   invite-012...
+```
+
+**Workflow:**
+
+1. Generates unlock token (30min expiry)
+2. Creates new enrollment invite
+3. Calls Sprites API to resume VM
+4. Executes bootstrap command to restart serve daemon
+5. VM reconnects to relay
+
+<Note>
+  Workspace identity is restored from escrowed keys. The VM uses the same machine ID as before.
+</Note>
+
+---
+
+## Destroy Workspace
+
+### Permanently Delete a Cloud Workspace
+
+```bash
+gssh cloud destroy <workspace-id>
+```
+
+Destroys the cloud workspace VM and removes all data.
+
+<ParamField path="workspace-id" type="string" required>
+  Workspace ID (from `gssh cloud list`)
+</ParamField>
+
+**Example:**
+```bash
+gssh cloud destroy ws-a1b2c3d4
+```
+
+**Output:**
+```
+Destroying workspace ws-a1b2c3d4...
+
+  ✓ Workspace ws-a1b2c3d4 destroyed.
+```
+
+<Warning>
+  This operation is **irreversible**. All data in the VM will be permanently deleted.
+</Warning>
+
+**Effect:**
+- Calls Sprites API to destroy VM
+- Tombstones workspace in local control store
+- Removes from `gssh cloud list` output
+- Escrowed identity keys are not deleted (for audit)
+
+---
+
+## Configuration
+
+### Control Store
+
+**Location:** `~/gitspace/.relay/control/control.db` (SQLite)
+
+Stores:
+- Cloud workspace metadata (ID, provider, repo, branch, status)
+- Escrowed workspace identities (encrypted keypairs)
+- Bootstrap and unlock token state
+- Event logs for debugging
+
+### Provider Config
+
+**Location:** System keychain (`gitspace-cloud-sprites-token`)
+
+Stores Sprites.dev API token.
+
+---
+
+## Troubleshooting
+
+### "Serve daemon is not running"
+
+Cloud commands require serve daemon for control operations.
+
+**Solution:**
+```bash
+gssh machine serve start
+gssh cloud status  # Verify
+```
+
+### "No Sprites token configured"
+
+API token not set up.
+
+**Solution:**
+```bash
+gssh cloud setup
+# Enter Sprites.dev token
+```
+
+### Workspace stuck in "bootstrapping"
+
+VM may have failed to enroll with relay.
+
+**Check logs:**
+```bash
+# View control event logs (requires database access)
+sqlite3 ~/gitspace/.relay/control/control.db \
+  "SELECT * FROM cloud_events WHERE workspace_id='ws-xxx' ORDER BY created_at DESC LIMIT 10;"
+```
+
+**Retry bootstrap:**
+```bash
+gssh cloud stop ws-xxx
+gssh cloud resume ws-xxx
+```
+
+### "No escrowed workspace identity found"
+
+Workspace identity was not saved during launch.
+
+**Solution:**
+
+Cannot resume this workspace securely. Destroy and re-launch:
+```bash
+gssh cloud destroy ws-xxx
+gssh cloud launch --repo owner/repo --branch main
+```
+
+### Bootstrap command fails (exit code 127)
+
+VM image may be missing `bun` runtime or `gssh` CLI.
+
+**Solution:**
+
+Use a custom image with bun installed:
+```bash
+gssh cloud launch --repo owner/repo --image custom-bun-image
+```
+
+Or use legacy mode (auto-installs via npm):
+- Legacy bootstrap uses `npm install -g gitspace`
+- Requires Node.js in the VM image
+
+---
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Serve Daemon" icon="server" href="/cli/machine/serve">
+    Start serve daemon for cloud control
+  </Card>
+  <Card title="Identity" icon="key" href="/cli/user/identity">
+    User root identity management
+  </Card>
+  <Card title="Status" icon="chart-line" href="/cli/status">
+    Check daemon health
+  </Card>
+</CardGroup>

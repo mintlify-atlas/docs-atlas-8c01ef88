@@ -1,0 +1,245 @@
+---
+title: gssh user host reserve
+description: Reserve a subdomain on gitspace.sh for remote access
+---
+
+## Overview
+
+Reserve a subdomain on `gitspace.sh` to enable remote terminal access without port forwarding or VPN. Your subdomain provides:
+
+- **Primary subdomain:** `<name>.gitspace.sh` for relay server
+- **Wildcard DNS:** `*.<name>.gitspace.sh` for multi-tenant hosting
+- **Serve subdomain:** `<name>.serve.gitspace.sh` for machine daemon
+- **Cloudflare tunnel:** Automatic HTTPS termination and routing
+
+## Usage
+
+```bash
+gssh user host reserve <subdomain>
+```
+
+## Arguments
+
+<ParamField path="subdomain" type="string" required>
+  Your desired subdomain name. Must be:
+  - Lowercase letters, numbers, and hyphens only
+  - Between 3-32 characters
+  - Not already taken
+  - Not a reserved word
+
+  Example: `brad`, `my-workspace`, `dev-team`
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+```bash Reserve subdomain
+gssh user host reserve brad
+```
+
+```bash Reserve with hyphen
+gssh user host reserve dev-team
+```
+</CodeGroup>
+
+## Process Flow
+
+1. **Check availability**
+   ```
+   Checking availability...
+   ```
+
+2. **Create tunnel**
+   ```
+   Creating tunnel...
+   ```
+
+3. **Configure DNS**
+   ```
+   Configuring DNS...
+   ```
+
+4. **Save credentials**
+   ```
+   Saving credentials...
+   ```
+
+5. **Confirm reservation**
+   ```
+   Reserved: brad.gitspace.sh
+     Wildcard: *.brad.gitspace.sh
+   Serve: brad.serve.gitspace.sh
+     Wildcard: *.brad.serve.gitspace.sh
+     (set as primary)
+
+   Run 'gssh machine serve start' to start hosting.
+   ```
+
+## What Gets Created
+
+### Primary Subdomain
+
+`<name>.gitspace.sh` is used for:
+- Relay server (`gssh relay start`)
+- WebSocket endpoint: `wss://<name>.gitspace.sh/ws`
+- Web interface for remote terminals
+
+### Serve Subdomain
+
+`<name>.serve.gitspace.sh` is used for:
+- Machine daemon (`gssh machine serve start`)
+- Terminal sessions and workspace access
+- PTY multiplexing
+
+### Tunnel Tokens
+
+Secure Cloudflare tunnel tokens are:
+- Fetched from gitspace.sh API
+- Stored in your system keychain
+- Used by `cloudflared` to establish tunnels
+
+**Token storage:**
+```
+TUNNEL_TOKEN_<subdomain>         # Primary tunnel
+TUNNEL_TOKEN_<subdomain>_serve   # Serve tunnel
+```
+
+### Local Configuration
+
+Host config stored in `~/.gitspace/host.json`:
+```json
+{
+  "subdomain": "brad",
+  "serveSubdomain": "brad.serve",
+  "subdomains": ["brad"],
+  "createdAt": 1704067200000
+}
+```
+
+## Requirements
+
+<Warning>
+  **You must be logged in first:**
+  ```bash
+  gssh user auth login
+  ```
+</Warning>
+
+<Warning>
+  **You must have cloudflared installed:**
+  ```bash
+  brew install cloudflared  # macOS
+  ```
+  Or follow [Cloudflare's installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+</Warning>
+
+<Warning>
+  **You need a user root identity:**
+  ```bash
+  gssh user identity init
+  ```
+</Warning>
+
+## Subdomain Limits
+
+**Free tier:** 3 subdomains per account
+
+```
+2/3 subdomains used (free tier)
+```
+
+To release a subdomain:
+```bash
+gssh user host release <subdomain>
+```
+
+## Primary Subdomain
+
+The first subdomain you reserve is automatically set as **primary**. This is used by default when you run:
+
+```bash
+gssh machine serve start   # Uses primary subdomain
+gssh relay start           # Uses primary subdomain
+```
+
+To change the primary:
+```bash
+gssh user host set-primary <subdomain>
+```
+
+## After Reservation
+
+Once reserved, you can:
+
+### Start the relay server
+```bash
+gssh relay start
+```
+
+Output:
+```
+Using account host brad.gitspace.sh for relay tunnel
+Relay listening on ws://brad.gitspace.sh:4480
+Public relay URL: wss://brad.gitspace.sh/ws
+```
+
+### Start the machine daemon
+```bash
+gssh machine serve start
+```
+
+Output:
+```
+Serve daemon started with cloudflared tunnel to brad.serve.gitspace.sh
+Public URL: https://brad.serve.gitspace.sh
+```
+
+### Connect from anywhere
+```bash
+gssh client connect <machine-id>
+```
+
+Or open in browser:
+```
+https://brad.gitspace.sh
+```
+
+## Troubleshooting
+
+### "Subdomain is not available"
+
+The subdomain is already taken or reserved. Try a different name:
+```bash
+gssh user host reserve brad-workspace
+```
+
+### "Not logged in"
+
+You need to authenticate first:
+```bash
+gssh user auth login
+```
+
+### "Identity not found"
+
+Create your user root identity:
+```bash
+gssh user identity init
+```
+
+### "Failed to get tunnel token"
+
+Network or API issue. Check:
+1. Internet connection
+2. gitspace.sh API status
+3. Try again in a few moments
+
+## Related Commands
+
+- [gssh user host status](/cli/host/status) - Check hosting status
+- `gssh user host list` - List your subdomains
+- `gssh user host release` - Release a subdomain
+- `gssh user host set-primary` - Set primary subdomain
+- `gssh user auth login` - Login to gitspace.sh
+- [gssh relay start](/cli/relay/start) - Start relay with tunnel
+- `gssh machine serve start` - Start machine daemon

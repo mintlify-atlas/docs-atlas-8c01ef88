@@ -1,0 +1,498 @@
+---
+title: 'gitspace.sh Hosting'
+description: 'Using the hosted relay platform with Cloudflare tunnels'
+icon: 'cloud'
+---
+
+The easiest way to get started with GitSpace remote access is through the hosted **gitspace.sh** platform. This provides a managed relay server, HTTPS endpoints, and Cloudflare tunnel integration.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         gitspace.sh                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐         ┌──────────────┐                      │
+│  │  Web Client  │         │  Relay Server│                      │
+│  │              │◀───────▶│              │                      │
+│  │  Browser UI  │  HTTPS  │  wss://...   │                      │
+│  └──────────────┘         └──────┬───────┘                      │
+│                                  │                               │
+│  ┌───────────────────────────────┼──────────────────────┐       │
+│  │                               │                       │       │
+│  │  Cloudflare Tunnel (cloudflared)                     │       │
+│  │                               │                       │       │
+│  │  ┌──────────────┐    ┌────────▼────────┐             │       │
+│  │  │ Your Machine │    │ Tunnel Endpoint │             │       │
+│  │  │              │◀───│                 │             │       │
+│  │  │ gssh serve   │    │ *.gitspace.sh   │             │       │
+│  │  └──────────────┘    └─────────────────┘             │       │
+│  │                                                       │       │
+│  └───────────────────────────────────────────────────────┘       │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
+
+- GitSpace CLI installed (`npm install -g gitspace`)
+- GitHub CLI authenticated (`gh auth login`)
+- User root identity created (`gssh user identity init`)
+
+### Setup Steps
+
+<Steps>
+  <Step title="Authenticate with gitspace.sh">
+    ```bash
+    gssh user auth login
+    ```
+    
+    Opens GitHub OAuth device flow in your browser. Authenticates using your GitHub account.
+  </Step>
+  
+  <Step title="Reserve your subdomain">
+    ```bash
+    gssh user host reserve <yourname>
+    ```
+    
+    Reserves `<yourname>.gitspace.sh` for your machine. Choose a unique name (3-63 characters, alphanumeric + hyphens).
+  </Step>
+  
+  <Step title="Verify hosting status">
+    ```bash
+    gssh user host status
+    ```
+    
+    Shows your reserved subdomain and tunnel configuration.
+  </Step>
+  
+  <Step title="Start machine daemon">
+    ```bash
+    gssh machine serve start
+    ```
+    
+    Auto-detects gitspace.sh hosting and starts serving on your subdomain.
+  </Step>
+  
+  <Step title="Access via web">
+    Open `https://<yourname>.gitspace.sh` in your browser to connect.
+  </Step>
+</Steps>
+
+## Authentication
+
+### GitHub OAuth Login
+
+```bash
+gssh user auth login
+```
+
+<Info>
+This uses GitHub's device flow for secure authentication without exposing your password. You'll see a code to enter at github.com/login/device.
+</Info>
+
+**What gets stored:**
+- OAuth token in OS keychain (`GITSPACE_TOKEN`)
+- No passwords or GitHub credentials on disk
+
+**Token permissions:**
+- `read:user` - Read your GitHub username and email
+- `read:org` - Read organization memberships (for team features)
+
+Implementation: [src/commands/auth.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/commands/auth.ts)
+
+### Check Authentication Status
+
+```bash
+gssh user auth status
+```
+
+**Example output:**
+
+```
+Authentication Status:
+  Logged in as: octocat
+  Email:        octocat@github.com
+  Token:        Valid
+```
+
+### Logout
+
+```bash
+gssh user auth logout
+```
+
+Removes OAuth token from keychain. You'll need to login again to use hosted features.
+
+## Subdomain Management
+
+### Reserve Subdomain
+
+```bash
+gssh user host reserve <subdomain>
+```
+
+Reserves a subdomain on gitspace.sh:
+
+- **Main relay**: `<subdomain>.gitspace.sh`
+- **Serve tunnel**: `<subdomain>.serve.gitspace.sh` (for process hosting)
+- **Tunnel tokens**: Stored in keychain for cloudflared
+
+**Subdomain rules:**
+- 3-63 characters
+- Alphanumeric + hyphens only
+- Must start with letter or number
+- Must be globally unique
+
+<Warning>
+Subdomains are first-come, first-served. If your desired name is taken, try adding a suffix (e.g., `yourname-dev`).
+</Warning>
+
+### List Subdomains
+
+```bash
+gssh user host list
+```
+
+Shows all subdomains you've reserved:
+
+```
+Your Subdomains:
+  myname.gitspace.sh      (primary)   active
+  myname-dev.gitspace.sh              active
+```
+
+### Set Primary Subdomain
+
+```bash
+gssh user host set-primary <subdomain>
+```
+
+Sets which subdomain `gssh machine serve start` uses by default. Useful if you have multiple subdomains.
+
+### Release Subdomain
+
+```bash
+gssh user host release <subdomain>
+```
+
+Releases a subdomain, making it available for others to claim.
+
+<Warning>
+**This action is permanent.** Once released, someone else can claim this subdomain. Make sure you've migrated to a new subdomain first if you still need hosting.
+</Warning>
+
+## Cloudflare Tunnel Integration
+
+### How Tunnels Work
+
+GitSpace uses **Cloudflare Tunnels** (via `cloudflared`) to expose your local machine:
+
+1. **Tunnel token**: gitspace.sh provides a Cloudflare tunnel token
+2. **cloudflared**: Runs on your machine, connects to Cloudflare edge
+3. **Routing**: Cloudflare routes `*.gitspace.sh` traffic to your tunnel
+4. **Process hosting**: Exposes workspace processes at `*.serve.gitspace.sh`
+
+**Automatic setup:**
+
+When you run `gssh machine serve start`, GitSpace:
+
+1. Checks for `cloudflared` binary (auto-installs if missing)
+2. Fetches tunnel token from gitspace.sh API
+3. Starts `cloudflared tunnel run` with token
+4. Monitors tunnel health and restarts if needed
+
+Implementation: [src/commands/serve.ts:startServeProcessHosting](https://github.com/gitspace-sh/gitspace/blob/main/src/commands/serve.ts#L713)
+
+### Process Hosting (serve.gitspace.sh)
+
+GitSpace automatically exposes workspace process ports via wildcard DNS:
+
+```
+https://<workspace-id>-<process>-<port>.<subdomain>.serve.gitspace.sh
+```
+
+**Example:**
+
+```bash
+# In workspace abc123, process "web" exposes port 3000
+gssh workspace add myapp
+gssh workspace context  # Note workspace ID: abc123
+
+# In myapp workspace, define process with port
+echo 'processes:
+  web:
+    cmd: npm run dev
+    ports:
+      - port: 3000
+        name: http
+' > .gitspace/processes.yml
+
+gssh process start web
+```
+
+Automatically available at:
+```
+https://abc123-web-http.myname.serve.gitspace.sh
+```
+
+See [src/commands/serve.ts:buildServeIngressConfig](https://github.com/gitspace-sh/gitspace/blob/main/src/commands/serve.ts#L429) for routing logic.
+
+### Tunnel Status
+
+```bash
+gssh machine serve status
+```
+
+Shows tunnel health:
+
+```
+┌─ serve daemon ───────────────────────────────┐
+│ Status:   ● running (pid 12345)              │
+│ Version:  1.0.0                              │
+│ Relay:    wss://myname.gitspace.sh/ws        │
+│           connected                          │
+│ Clients:  2 active                           │
+│ Uptime:   3h 45m                             │
+│ Hosting:  ● myname.gitspace.sh               │
+└──────────────────────────────────────────────┘
+```
+
+Tunnel indicator:
+- **● (green)**: Tunnel active and healthy
+- **● (red)**: Tunnel failed (retrying in background)
+
+### Manual Tunnel Control
+
+<Accordion title="Advanced: Run cloudflared manually">
+If you need custom tunnel configuration:
+
+```bash
+# Get tunnel token from keychain
+gssh user host status  # Shows token key name
+
+# Extract token
+TUNNEL_TOKEN=$(security find-generic-password -a gitspace -s TUNNEL_TOKEN_myname -w)
+
+# Run cloudflared manually
+cloudflared tunnel --config custom-config.yml run
+```
+
+See [Cloudflare Tunnel docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) for advanced configuration.
+</Accordion>
+
+## Web Client Access
+
+### Open Web Terminal
+
+Navigate to your subdomain in any browser:
+
+```
+https://<yourname>.gitspace.sh
+```
+
+<Steps>
+  <Step title="Load web client">
+    Static files served from relay at `/` (React + xterm.js)
+  </Step>
+  
+  <Step title="Recover owner identity">
+    If first visit, prompted to enter 24-word mnemonic
+  </Step>
+  
+  <Step title="Connect to relay">
+    Browser opens WebSocket to `wss://<yourname>.gitspace.sh/ws?role=client`
+  </Step>
+  
+  <Step title="List machines">
+    Sends signed `list_machines` to see available machines
+  </Step>
+  
+  <Step title="Select machine">
+    Click machine to connect, starts X3DH handshake
+  </Step>
+  
+  <Step title="Terminal session">
+    xterm.js displays encrypted terminal, connected to PTY on machine
+  </Step>
+</Steps>
+
+### Browser Identity Storage
+
+Web client stores identity in browser localStorage:
+
+- **Encrypted identity**: `localStorage.getItem('gitspace_identity')`
+- **Mnemonic**: Derived keys only, original mnemonic not stored
+- **Device certificate**: Generated on first use
+
+<Warning>
+Clearing browser storage will lose your identity. Make sure you have your 24-word mnemonic backed up before clearing.
+</Warning>
+
+## Daemon Management
+
+### Start Serving (Background)
+
+```bash
+gssh machine serve start
+```
+
+Starts daemon in background:
+- Forks to background process
+- Writes PID to `~/.gitspace/.serve/serve.pid`
+- Logs to `~/.gitspace/.serve/serve.log`
+- Auto-starts cloudflared tunnel
+
+### Start Serving (Foreground)
+
+```bash
+gssh machine serve start --foreground
+```
+
+Runs in current terminal (useful for debugging):
+- Prints logs to stdout
+- Ctrl+C stops daemon
+- No background process
+
+### Stop Serving
+
+```bash
+gssh machine serve stop
+```
+
+Gracefully stops daemon:
+- Sends SIGTERM to serve process
+- Closes all client connections
+- Stops cloudflared tunnel
+- Cleans up PID file
+
+### Check Status
+
+```bash
+gssh status
+```
+
+Shows all daemon statuses (serve, tmux-lite, relay):
+
+```
+=== GitSpace Status ===
+
+Serve Daemon:
+  ● running (pid 12345)
+  Relay: wss://myname.gitspace.sh/ws (connected)
+  Clients: 2 active
+  Uptime: 3h 45m
+
+Tmux-lite Daemon:
+  ● running (pid 12346)
+  Sessions: 5 active
+  Uptime: 3h 45m
+
+Cloud Hosting:
+  ● active
+  Subdomain: myname.gitspace.sh
+  Tunnel: healthy
+```
+
+## Troubleshooting
+
+### "Subdomain already taken"
+
+**Problem**: `gssh user host reserve <name>` fails with "already reserved".
+
+**Solutions**:
+- Try a different subdomain name
+- Add a suffix: `<name>-dev`, `<name>-1`, `<name>-work`
+- Check if you already own it: `gssh user host list`
+
+### "cloudflared not found"
+
+**Problem**: Serve start fails with "cloudflared is not installed".
+
+**Solutions**:
+
+```bash
+# macOS (Homebrew)
+brew install cloudflared
+
+# Linux (Debian/Ubuntu)
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared-linux-amd64.deb
+
+# Or use official installer
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+sudo mv cloudflared /usr/local/bin/
+sudo chmod +x /usr/local/bin/cloudflared
+```
+
+### "Tunnel failed to start"
+
+**Problem**: Serve status shows tunnel as inactive.
+
+**Solutions**:
+
+```bash
+# Check tunnel logs
+tail -f ~/.gitspace/.serve/serve.log | grep cloudflared
+
+# Verify tunnel token exists
+gssh user host status
+
+# Re-fetch tunnel token
+gssh user auth login  # Re-authenticate
+gssh user host reserve <subdomain> --force  # Re-reserve to refresh token
+```
+
+### "Connection failed: not authorized"
+
+**Problem**: Web client can't connect to machine.
+
+**Solutions**:
+- Verify web client identity matches machine owner:
+  - Check browser localStorage for `gitspace_identity`
+  - Verify you used the same 24-word mnemonic
+- Ensure machine is enrolled:
+  ```bash
+  gssh relay machines list
+  ```
+- Check machine is online:
+  ```bash
+  gssh client machines list --relay wss://<yourname>.gitspace.sh/ws
+  ```
+
+## API Reference
+
+### gitspace.sh API Endpoints
+
+**Base URL**: `https://api.gitspace.sh`
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/subdomains` | GET | List your subdomains |
+| `/subdomains` | POST | Reserve new subdomain |
+| `/subdomains/:name` | DELETE | Release subdomain |
+| `/subdomains/:name/token` | GET | Get tunnel token |
+| `/subdomains/:name/primary` | PUT | Set as primary |
+
+**Authentication**: Bearer token from `gssh user auth login`
+
+Implementation: [src/commands/host.ts](https://github.com/gitspace-sh/gitspace/blob/main/src/commands/host.ts)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Self-Hosted Relay" icon="server" href="/remote/self-hosted">
+    Run your own relay for complete control
+  </Card>
+  
+  <Card title="Security Model" icon="shield" href="/remote/security">
+    Understand gitspace.sh security guarantees
+  </Card>
+  
+  <Card title="Hosting Status" icon="globe" href="/cli/host/status">
+    Check your hosting configuration and status
+  </Card>
+</CardGroup>

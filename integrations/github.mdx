@@ -1,0 +1,368 @@
+---
+title: "GitHub Integration"
+description: "Authenticate with GitHub and manage repository access"
+---
+
+## Overview
+
+GitSpace requires GitHub authentication for two purposes:
+
+1. **Repository Access** - Clone and manage your GitHub repositories using the `gh` CLI
+2. **gitspace.sh Hosting** - Access hosted machine terminals via the gitspace.sh service (optional)
+
+This guide covers authentication with gitspace.sh. For repository operations, ensure the GitHub CLI (`gh`) is installed and authenticated separately.
+
+## GitHub CLI Authentication
+
+GitSpace uses the GitHub CLI (`gh`) for all repository operations:
+
+### Install GitHub CLI
+
+If you haven't already:
+
+<CodeGroup>
+```bash macOS
+brew install gh
+```
+
+```bash Linux (Debian/Ubuntu)
+sudo apt install gh
+```
+
+```bash Linux (Fedora/RHEL)
+sudo dnf install gh
+```
+</CodeGroup>
+
+### Authenticate
+
+```bash
+gh auth login
+```
+
+Follow the prompts to authenticate with GitHub. The `gh` CLI will guide you through the OAuth flow.
+
+<Note>
+  GitSpace automatically uses your `gh` CLI authentication for repository operations. No additional configuration needed.
+</Note>
+
+## gitspace.sh Authentication
+
+### Overview
+
+The gitspace.sh service provides:
+
+- Hosted relay servers for remote machine access
+- Subdomain hosting (e.g., `yourname.gitspace.sh`)
+- Web-based terminal interface
+- GitHub-based user identity
+
+### Prerequisites
+
+Before authenticating with gitspace.sh:
+
+<Steps>
+  <Step title="Create your identity">
+    ```bash
+    gssh user identity init
+    ```
+    
+    This creates a cryptographic keypair (Ed25519/X25519) for machine authentication and encryption.
+    
+    <Warning>
+      Store your identity password securely. You'll need it for authentication.
+    </Warning>
+  </Step>
+</Steps>
+
+### Login Flow
+
+<Steps>
+  <Step title="Start authentication">
+    ```bash
+    gssh user auth login
+    ```
+    
+    This initiates the GitHub OAuth Device Flow.
+  </Step>
+
+  <Step title="Copy verification code">
+    The CLI will display a one-time code:
+    
+    ```
+    ! First, copy your one-time code: ABCD-1234
+    
+    Press Enter to open https://github.com/login/device in your browser...
+    ```
+    
+    Copy the code before continuing.
+  </Step>
+
+  <Step title="Authorize on GitHub">
+    1. Press Enter to open your browser (or manually visit the URL)
+    2. Paste the verification code
+    3. Click **Authorize** to grant access
+    
+    Required scopes:
+    - `read:user` - Read your GitHub profile
+    - `user:email` - Read your email address
+  </Step>
+
+  <Step title="Complete authentication">
+    The CLI will:
+    1. Exchange the GitHub token for a gitspace.sh token
+    2. Sign the authentication request with your machine identity
+    3. Save the token to your system keychain
+    4. Sync your subdomain configuration
+    
+    ```
+    ✔ Authentication complete
+    ✔ Logged in as your-github-username
+    ✔ Token saved to keychain
+    ```
+  </Step>
+</Steps>
+
+### Authentication Details
+
+The authentication process:
+
+1. **Device Flow**: Uses GitHub's Device Flow OAuth for CLI authentication
+2. **Identity Proof**: Signs a timestamp-based challenge with your Ed25519 key
+3. **Token Exchange**: Receives a JWT token from gitspace.sh API
+4. **Secure Storage**: Stores token in system keychain as `GITSPACE_TOKEN`
+
+#### Authentication Signature
+
+The CLI signs this message:
+
+```typescript
+const authMessage = `gitspace-device-auth:${timestamp}`;
+const signature = sign(authMessage, identity.signing.secretKey);
+```
+
+This proves you control both:
+- The GitHub account (via OAuth)
+- The machine identity (via signature)
+
+### Headless/SSH Environments
+
+If you're on a headless server or SSH session:
+
+```bash
+gssh user auth login
+```
+
+The CLI will detect the environment and provide a manual URL:
+
+```
+! First, copy your one-time code: ABCD-1234
+
+Open this URL in your browser: https://github.com/login/device
+Enter the code: ABCD-1234
+
+Waiting for authorization...
+```
+
+Open the URL on your local machine and enter the code.
+
+## Managing Authentication
+
+### Check Status
+
+View your current authentication state:
+
+```bash
+gssh user auth status
+```
+
+Output shows:
+- GitHub username
+- Email address
+- Name (if set)
+- Token validity
+
+### Logout
+
+Clear your local gitspace.sh credentials:
+
+```bash
+gssh user auth logout
+```
+
+<Warning>
+  This only clears the local token. Your GitHub authorization remains active. Revoke it from [GitHub Settings → Applications](https://github.com/settings/applications) if needed.
+</Warning>
+
+## Subdomain Hosting
+
+After authentication, you can reserve a subdomain for your machines:
+
+```bash
+gssh user host reserve <subdomain-name>
+```
+
+See the [Hosting guide](/cli/host/reserve) for details on subdomain management.
+
+## API Configuration
+
+By default, GitSpace connects to the production API:
+
+```
+https://api.gitspace.sh
+```
+
+To use a different API endpoint (self-hosted or development):
+
+```bash
+export GITSPACE_API_URL=https://api.example.com
+gssh user auth login
+```
+
+## Token Storage
+
+Authentication tokens are stored securely:
+
+- **Location**: System keychain (macOS Keychain, Linux Secret Service)
+- **Key**: `GITSPACE_TOKEN`
+- **Format**: JWT signed by gitspace.sh API
+- **Expiration**: Tokens are long-lived but can be revoked
+
+### Token Contents
+
+The gitspace.sh token contains:
+
+```json
+{
+  "user": {
+    "id": "user-uuid",
+    "github_username": "your-username",
+    "email": "you@example.com",
+    "name": "Your Name",
+    "avatar_url": "https://..."
+  }
+}
+```
+
+## Device Management
+
+Each machine is registered with:
+
+- **Device Name**: Your machine's hostname (`os.hostname()`)
+- **Public Key**: Ed25519 signing key from your identity
+- **Fingerprint**: Sent as `X-Device-Fingerprint` header in API requests
+
+View your devices:
+
+```bash
+# This feature is planned
+# gssh user devices list
+```
+
+## Troubleshooting
+
+### No Identity Found
+
+If you see "Identity not found":
+
+```bash
+gssh user identity init
+```
+
+Create your identity before authenticating.
+
+### Session Expired
+
+If `gssh user auth status` shows "Session expired":
+
+```bash
+gssh user auth login
+```
+
+Re-authenticate to get a new token.
+
+### GitHub Authorization Failed
+
+If the device flow fails:
+
+1. Ensure you're connected to the internet
+2. Check that GitHub is accessible
+3. Try revoking and re-authorizing the app
+4. Check for any GitHub service issues
+
+### API Unreachable
+
+If the CLI can't reach the API:
+
+```bash
+# Check your API endpoint
+echo $GITSPACE_API_URL
+
+# Test connectivity
+curl https://api.gitspace.sh/config
+```
+
+For self-hosted setups, verify your API URL is correct.
+
+## Security Considerations
+
+### Token Security
+
+- Tokens are stored in your system keychain, not in plain text files
+- Never share your token or commit it to version control
+- Use `gssh user auth logout` on shared machines
+
+### Identity Security
+
+- Your identity password is never sent to gitspace.sh
+- The API only receives your public keys and signatures
+- Private keys remain on your local machine
+
+### OAuth Scopes
+
+The GitHub OAuth app requests minimal scopes:
+
+- `read:user` - Required to identify your account
+- `user:email` - Optional, for account notifications
+
+No repository access or write permissions are requested for gitspace.sh authentication.
+
+<Note>
+  Repository operations via `gh` CLI use separate authentication with full repository access.
+</Note>
+
+## Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `gssh user auth login` | Authenticate with gitspace.sh via GitHub |
+| `gssh user auth logout` | Clear local credentials |
+| `gssh user auth status` | Show authentication status |
+| `gssh user identity init` | Create machine identity (required first) |
+| `gssh user identity show` | Display identity fingerprint |
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `GITSPACE_API_URL` | API endpoint for gitspace.sh | `https://api.gitspace.sh` |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Reserve a subdomain" icon="globe" href="/cli/host/reserve">
+    Get a subdomain like `yourname.gitspace.sh` for remote access.
+  </Card>
+  
+  <Card title="Start machine daemon" icon="server" href="/cli/machine/serve">
+    Make your machine accessible remotely.
+  </Card>
+  
+  <Card title="Machine identity" icon="fingerprint" href="/remote/identity">
+    Learn about cryptographic identity and E2E encryption.
+  </Card>
+  
+  <Card title="Access control" icon="shield" href="/remote/security">
+    Manage who can access your machines.
+  </Card>
+</CardGroup>

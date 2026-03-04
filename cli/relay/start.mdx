@@ -1,0 +1,176 @@
+---
+title: gssh relay start
+description: Start the relay server for remote terminal access
+---
+
+## Overview
+
+Start the GitSpace relay server to enable remote terminal access. The relay routes encrypted WebSocket traffic between machines and clients without being able to decrypt the content (end-to-end encryption).
+
+When you have a reserved subdomain on gitspace.sh, the relay automatically:
+- Fetches your tunnel token
+- Starts a cloudflared tunnel to your subdomain
+- Binds the relay server to that domain
+
+## Usage
+
+```bash
+gssh relay start [options]
+```
+
+## Options
+
+<ParamField path="--port" type="number" default="4480">
+  Port to listen on. Default is 4480 ("GIT0" on phone keypad).
+</ParamField>
+
+<ParamField path="--bind" type="string" default="0.0.0.0">
+  Address to bind to. Use `127.0.0.1` for localhost-only access.
+</ParamField>
+
+<ParamField path="--hostname" type="string">
+  Only serve requests for this domain (optional). Useful for virtual hosting or security restrictions.
+</ParamField>
+
+<ParamField path="--label" type="string">
+  Human-readable label for this relay identity. Helps identify the relay in logs and fingerprints.
+</ParamField>
+
+## Environment Variables
+
+<ParamField path="PORT" type="number">
+  Alternative way to set the relay port.
+</ParamField>
+
+<ParamField path="RELAY_BIND" type="string">
+  Alternative way to set the bind address.
+</ParamField>
+
+<ParamField path="RELAY_HOST" type="string">
+  Alternative way to set the hostname restriction.
+</ParamField>
+
+## Examples
+
+### Start with gitspace.sh hosting
+
+<CodeGroup>
+```bash Default (auto-tunnel)
+gssh relay start
+```
+
+```bash Custom port
+gssh relay start --port 8080
+```
+
+```bash With label
+gssh relay start --label "Production Relay"
+```
+</CodeGroup>
+
+<Note>
+  If you have multiple subdomains, the relay will prompt you to select which one to use for the tunnel.
+</Note>
+
+### Start self-hosted relay
+
+<CodeGroup>
+```bash Local testing
+gssh relay start --bind 127.0.0.1 --port 4480
+```
+
+```bash Public relay
+gssh relay start --hostname relay.example.com
+```
+</CodeGroup>
+
+## Relay Identity
+
+On first start, the relay generates an Ed25519 identity keypair stored in your keychain. The relay displays its fingerprint and public key:
+
+```
+┌────────────────────────────────────────────────┐
+│ Relay Identity                                 │
+│ Fingerprint: SHA256:abc123...                  │
+│ Label: Production Relay                        │
+│ Public Key:                                     │
+│ AAAA...                                         │
+└────────────────────────────────────────────────┘
+```
+
+<Note>
+  Share the relay's public key with machines that need to connect. Machines verify the relay identity during enrollment.
+</Note>
+
+## Tunnel Setup
+
+When using gitspace.sh hosting, the relay:
+
+1. Checks for reserved subdomains
+2. Selects primary subdomain (or prompts if multiple exist)
+3. Fetches tunnel token from gitspace.sh API
+4. Starts cloudflared tunnel process
+5. Binds relay server to the subdomain
+
+**Output:**
+```
+Using account host brad.gitspace.sh for relay tunnel
+Relay listening on ws://brad.gitspace.sh:4480
+Public relay URL: wss://brad.gitspace.sh/ws
+
+Press Ctrl+C to stop
+```
+
+## Requirements
+
+<Warning>
+  **For gitspace.sh hosting:** You must have cloudflared installed:
+  ```bash
+  brew install cloudflared  # macOS
+  # or follow instructions at https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+  ```
+</Warning>
+
+## Shutdown
+
+Press `Ctrl+C` to gracefully stop the relay. This will:
+- Stop the cloudflared tunnel (if running)
+- Close all active connections
+- Clean up runtime state
+
+Or use:
+```bash
+gssh relay stop
+```
+
+## Runtime State
+
+The relay stores its runtime state in `~/.gitspace/.relay/runtime/relay-state.json`:
+
+```json
+{
+  "pid": 12345,
+  "startedAt": 1704067200000,
+  "port": 4480,
+  "bind": "0.0.0.0",
+  "hostname": "brad.gitspace.sh",
+  "tunnelPid": 12346,
+  "tunnelSubdomain": "brad"
+}
+```
+
+## Security
+
+- **End-to-end encryption:** The relay cannot decrypt terminal I/O (uses X3DH + AES-256-GCM)
+- **Identity verification:** Machines authenticate with Ed25519 challenge-response
+- **Access control:** Only registered machines can connect
+- **Process ownership:** The relay verifies ownership before signaling processes
+
+## Related Commands
+
+- [gssh relay machines list](/cli/relay/machines) - List registered machines
+- [gssh relay machines revoke](/cli/relay/machines) - Revoke machine access
+- `gssh relay stop` - Stop the relay server
+- `gssh relay status` - Show relay server status
+- [gssh user host reserve](/cli/host/reserve) - Reserve a subdomain
+- [gssh user host status](/cli/host/status) - Check hosting status

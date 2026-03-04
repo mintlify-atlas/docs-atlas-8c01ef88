@@ -1,0 +1,224 @@
+---
+title: "gssh workspace context"
+description: "Show resolved workspace context"
+---
+
+## Synopsis
+
+```bash
+gssh workspace context --project <name> --workspace <name> [options]
+```
+
+## Description
+
+Displays the resolved workspace context including:
+- Project name
+- Workspace name
+- Session mode (if running in a workspace session)
+- tmux-lite session ID (if attached to a session)
+
+This command is useful for debugging context resolution, verifying which workspace you're working in, and for scripting where you need to programmatically determine the current context.
+
+## Options
+
+<ParamField path="--project" type="string" required>
+  Project name
+</ParamField>
+
+<ParamField path="--workspace" type="string" required>
+  Workspace name
+</ParamField>
+
+<ParamField path="--json" type="boolean" optional default="false">
+  Output context information as structured JSON
+</ParamField>
+
+## Output Format
+
+### Standard Output
+
+```
+Project: myapp
+Workspace: feature-auth
+```
+
+### JSON Output
+
+```json
+{
+  "mode": "workspace",
+  "tmuxSessionId": "session-abc123",
+  "context": {
+    "projectName": "myapp",
+    "workspaceName": "feature-auth"
+  }
+}
+```
+
+<ParamField path="mode" type="string | null">
+  Session mode from `GSSH_SESSION_MODE` environment variable. 
+  
+  Values:
+  - `"workspace"` - Running in a workspace session shell
+  - `null` - Not in a session
+</ParamField>
+
+<ParamField path="tmuxSessionId" type="string | null">
+  tmux-lite session ID from `TMUX_LITE` environment variable, or `null` if not attached
+</ParamField>
+
+<ParamField path="context" type="object | null">
+  Resolved workspace context object, or `null` if no context could be resolved
+  
+  Properties:
+  - `projectName` (string) - Project name
+  - `workspaceName` (string) - Workspace name
+</ParamField>
+
+## Examples
+
+### Show current workspace context
+
+```bash
+gssh workspace context --project myapp --workspace feature-auth
+```
+
+Output:
+```
+Project: myapp
+Workspace: feature-auth
+```
+
+### Get context as JSON
+
+```bash
+gssh workspace context --project myapp --workspace feature-auth --json
+```
+
+Output:
+```json
+{
+  "mode": null,
+  "tmuxSessionId": null,
+  "context": {
+    "projectName": "myapp",
+    "workspaceName": "feature-auth"
+  }
+}
+```
+
+### Use in a script
+
+```bash
+#!/bin/bash
+context=$(gssh workspace context --project myapp --workspace feature-auth --json)
+project=$(echo $context | jq -r '.context.projectName')
+workspace=$(echo $context | jq -r '.context.workspaceName')
+
+echo "Working in: $project/$workspace"
+```
+
+### Check if in a session
+
+```bash
+gssh workspace context --project myapp --workspace feature-auth --json | \
+  jq -r '.mode'
+```
+
+Returns `"workspace"` if in a session, `null` otherwise.
+
+## Context Resolution
+
+The command resolves workspace context from multiple sources in priority order:
+
+1. **Explicit flags**: `--project` and `--workspace` (required)
+2. **Environment variables**: `GSSH_SPACE_PROJECT` and `GSSH_SPACE_WORKSPACE`
+3. **Current directory**: Detects if `cwd` is inside a workspace directory
+4. **Global config**: Falls back to `currentProject` and `currentWorkspace`
+
+<Note>
+  This command **requires** both `--project` and `--workspace` flags, so it will always show the explicitly provided context rather than attempting to auto-resolve.
+</Note>
+
+## Environment Variables
+
+<ParamField path="GSSH_SESSION_MODE" type="string">
+  Indicates the session mode. Set to `"workspace"` when running in a workspace session shell (created by gssh).
+</ParamField>
+
+<ParamField path="GSSH_SPACE_PROJECT" type="string">
+  Overrides the project name for context resolution.
+</ParamField>
+
+<ParamField path="GSSH_SPACE_WORKSPACE" type="string">
+  Overrides the workspace name for context resolution.
+</ParamField>
+
+<ParamField path="TMUX_LITE" type="string">
+  Set by tmux-lite when attached to a session. Contains the session ID.
+</ParamField>
+
+## Use Cases
+
+### Verify Context in Scripts
+
+Before running workspace-specific operations, verify you're in the correct context:
+
+```bash
+context=$(gssh workspace context --project myapp --workspace feature-auth --json)
+if [ "$(echo $context | jq -r '.context.workspaceName')" != "feature-auth" ]; then
+  echo "Error: Not in expected workspace"
+  exit 1
+fi
+```
+
+### Debug Session Issues
+
+Check if you're in a workspace session:
+
+```bash
+gssh workspace context --project myapp --workspace feature-auth --json | jq '.mode'
+```
+
+If output is `"workspace"`, you're in a session shell with restricted commands.
+
+### Get tmux Session ID
+
+```bash
+gssh workspace context --project myapp --workspace feature-auth --json | \
+  jq -r '.tmuxSessionId // "not attached"'
+```
+
+## No Context Resolved
+
+If context cannot be resolved (which shouldn't happen with required flags):
+
+```
+No workspace context resolved.
+```
+
+JSON output:
+```json
+{
+  "mode": null,
+  "tmuxSessionId": null,
+  "context": null
+}
+```
+
+## Related Commands
+
+- [`gssh workspace list`](/cli/workspace/list) - List all workspaces
+- [`gssh workspace add`](/cli/workspace/add) - Create a workspace
+- [`gssh project list`](/cli/project/list) - List projects
+- [`gssh status`](/cli/status) - Show daemon status
+
+## Implementation Details
+
+- Located in: `src/commands/review.ts` as `showSpaceContext()`
+- Uses `resolveCurrentWorkspace()` helper for context resolution
+- Reads from:
+  - Environment variables (`GSSH_SESSION_MODE`, `TMUX_LITE`, `GSSH_SPACE_PROJECT`, `GSSH_SPACE_WORKSPACE`)
+  - Current working directory path
+  - Global config at `~/.gitspace/.config.json`
+  - Project config at `~/gitspace/<project>/.config.json`

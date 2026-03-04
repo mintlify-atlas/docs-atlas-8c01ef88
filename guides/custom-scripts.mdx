@@ -1,0 +1,598 @@
+---
+title: 'Writing Custom Scripts'
+description: 'Create lifecycle scripts for workspace setup, selection, and cleanup'
+icon: 'scroll'
+---
+
+# Writing Custom Scripts
+
+GitSpace uses **convention over configuration** for custom scripts. Scripts are discovered automatically from `.gitspace/scripts/` directories in each workspace, allowing different branches to have different automation.
+
+## Script Phases
+
+GitSpace runs scripts at specific lifecycle points:
+
+| Phase | When | Use Case |
+|-------|------|----------|
+| `pre/` | **Deprecated** | Migrate to ordered `setup/` files |
+| `setup/` | When setup state changes | Install dependencies, initial build |
+| `select/` | Every new terminal attach | Git fetch, status checks |
+| `remove/` | Before workspace deletion | Cleanup, notifications |
+
+<Note>
+The `pre/` phase is deprecated. Move your pre-setup scripts into the `setup/` directory with appropriate numeric prefixes (e.g., `01-`, `02-`) to control execution order.
+</Note>
+
+## Directory Structure
+
+Scripts live inside each workspace's `.gitspace/scripts/` directory:
+
+```
+~/gitspace/<project-name>/workspaces/<workspace-name>/
+└── .gitspace/
+    └── scripts/
+        ├── setup/            # Run when setup state requires refresh
+        │   ├── 01-install-deps.sh
+        │   └── 02-build.sh
+        ├── select/           # Run on each new terminal attach
+        │   ├── 01-git-fetch.sh
+        │   └── 02-status.sh
+        └── remove/           # Run before workspace deletion
+            └── 01-cleanup.sh
+```
+
+<Warning>
+Scripts are **per-workspace**, not per-project. This means each git worktree (workspace) can have its own scripts that are version-controlled with the branch.
+</Warning>
+
+## Script Execution Rules
+
+<Steps>
+  <Step title="Scripts must be executable">
+    Set the executable bit:
+    
+    ```bash
+    chmod +x .gitspace/scripts/setup/01-install-deps.sh
+    ```
+  </Step>
+
+  <Step title="Scripts run alphabetically">
+    Use numeric prefixes to control order:
+    
+    ```
+    01-copy-env.sh    # Runs first
+    02-install.sh     # Runs second
+    03-build.sh       # Runs third
+    ```
+  </Step>
+
+  <Step title="Working directory is the workspace">
+    Scripts execute with `cwd` set to the workspace root:
+    
+    ```bash
+    #!/bin/bash
+    # Already in workspace directory
+    pwd  # ~/gitspace/my-project/workspaces/feature-xyz/
+    ```
+  </Step>
+
+  <Step title="Arguments are passed">
+    Two positional arguments are provided:
+    
+    - `$1` = workspace name (e.g., `feature-xyz`)
+    - `$2` = repository name (e.g., `myorg/my-repo`)
+  </Step>
+
+  <Step title="Bundle values available as environment variables">
+    Values collected during onboarding are exported:
+    
+    - Exact key: `$API_KEY` (from `configKey: "API_KEY"`)
+    - Normalized alias: `$TEAM_NAME` (from `configKey: "teamName"`)
+  </Step>
+</Steps>
+
+## Example Scripts
+
+### Setup Phase
+
+#### Install Dependencies
+
+```bash .gitspace/scripts/setup/01-install-deps.sh
+#!/bin/bash
+set -e
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "📦 Installing dependencies for $WORKSPACE_NAME..."
+
+if [ -f "package.json" ]; then
+  npm install
+fi
+
+if [ -f "requirements.txt" ]; then
+  pip install -r requirements.txt
+fi
+
+echo "✅ Dependencies installed"
+```
+
+#### Environment Setup
+
+```bash .gitspace/scripts/setup/02-env-setup.sh
+#!/bin/bash
+set -e
+
+WORKSPACE_NAME=$1
+
+# Use bundle values (from onboarding)
+if [ -n "$API_KEY" ]; then
+  echo "API_KEY=***" > .env
+  echo "✅ API key configured"
+fi
+
+if [ -n "$TEAM_NAME" ]; then
+  echo "TEAM=$TEAM_NAME" >> .env
+  echo "✅ Team set to $TEAM_NAME"
+fi
+
+echo "✅ Environment configured"
+```
+
+#### Initial Build
+
+```bash .gitspace/scripts/setup/03-build.sh
+#!/bin/bash
+set -e
+
+echo "🔨 Running initial build..."
+
+if [ -f "package.json" ]; then
+  npm run build
+fi
+
+if [ -f "Makefile" ]; then
+  make build
+fi
+
+echo "✅ Build complete"
+```
+
+### Select Phase
+
+#### Git Fetch
+
+```bash .gitspace/scripts/select/01-git-fetch.sh
+#!/bin/bash
+set -e
+
+echo "🔄 Fetching latest changes..."
+git fetch --quiet
+
+UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "")
+
+if [ -n "$UPSTREAM" ]; then
+  LOCAL=$(git rev-parse @)
+  REMOTE=$(git rev-parse "$UPSTREAM")
+  BASE=$(git merge-base @ "$UPSTREAM")
+
+  if [ "$LOCAL" = "$REMOTE" ]; then
+    echo "✅ Branch is up to date"
+  elif [ "$LOCAL" = "$BASE" ]; then
+    echo "⚠️  Branch is behind by $(git rev-list --count @.."$UPSTREAM") commits"
+  elif [ "$REMOTE" = "$BASE" ]; then
+    echo "📤 Branch is ahead by $(git rev-list --count "$UPSTREAM"..@) commits"
+  else
+    echo "🔀 Branch has diverged"
+  fi
+fi
+```
+
+#### Status Check
+
+```bash .gitspace/scripts/select/02-status.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+
+echo ""
+echo "📂 Workspace: $WORKSPACE_NAME"
+echo "🌿 Branch: $(git branch --show-current)"
+echo ""
+
+# Check for uncommitted changes
+if ! git diff-index --quiet HEAD --; then
+  echo "⚠️  You have uncommitted changes"
+  git status --short
+else
+  echo "✅ Working directory clean"
+fi
+
+echo ""
+```
+
+### Remove Phase
+
+#### Cleanup Resources
+
+```bash .gitspace/scripts/remove/01-cleanup.sh
+#!/bin/bash
+set -e
+
+WORKSPACE_NAME=$1
+
+echo "🧹 Cleaning up $WORKSPACE_NAME..."
+
+# Stop any running dev servers
+if [ -f ".pid" ]; then
+  PID=$(cat .pid)
+  if ps -p "$PID" > /dev/null; then
+    kill "$PID" || true
+    echo "✅ Stopped dev server (PID $PID)"
+  fi
+  rm .pid
+fi
+
+# Clean build artifacts
+rm -rf node_modules/.cache dist build
+echo "✅ Removed build artifacts"
+
+echo "✅ Cleanup complete"
+```
+
+#### Notify Team
+
+```bash .gitspace/scripts/remove/02-notify.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+# Optional: Send Slack notification
+if [ -n "$SLACK_WEBHOOK" ]; then
+  curl -X POST "$SLACK_WEBHOOK" \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"text\": \"Workspace \\\`$WORKSPACE_NAME\\\` in $REPOSITORY was deleted\"
+    }" \
+    --silent --output /dev/null
+  
+  echo "📢 Team notified"
+fi
+```
+
+## Bundle Values in Scripts
+
+Values collected during project onboarding are available in scripts:
+
+### Bundle Configuration
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "my-app-bundle",
+  "onboarding": [
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Enter your API key",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team-name",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Enter your team name",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    },
+    {
+      "id": "aws-region",
+      "type": "input",
+      "title": "AWS Region",
+      "description": "Enter AWS region",
+      "configKey": "AWS_REGION",
+      "defaultValue": "us-east-1"
+    }
+  ]
+}
+```
+
+### Environment Variables in Scripts
+
+GitSpace exports bundle values in two formats:
+
+1. **Exact key**: Uses the `configKey` exactly as specified
+2. **Normalized alias**: Uppercase snake-case version
+
+```bash .gitspace/scripts/setup/01-configure.sh
+#!/bin/bash
+set -e
+
+# Access by exact key name
+echo "API Key: ${apiKey:0:10}..."  # From configKey: "apiKey"
+echo "Region: $AWS_REGION"          # From configKey: "AWS_REGION"
+
+# Access by normalized alias (when different from exact key)
+echo "Team: $TEAM_NAME"             # Normalized from configKey: "teamName"
+
+# Secrets are redacted in logs but available to scripts
+if [ -n "$apiKey" ]; then
+  echo "API_KEY=<redacted>" > .env
+fi
+
+# Regular values can be echoed safely
+if [ -n "$teamName" ]; then
+  echo "TEAM=$teamName" >> .env
+fi
+```
+
+<Accordion title="How Normalization Works">
+  **Normalization Rules:**
+  - Convert to uppercase
+  - Replace non-alphanumeric characters with underscores
+  - Examples:
+    - `teamName` → `TEAM_NAME`
+    - `api-key` → `API_KEY`
+    - `myValue123` → `MY_VALUE_123`
+  
+  **When to use each:**
+  - Use exact key if your `configKey` is already in `SCREAMING_SNAKE_CASE`
+  - Use normalized alias if your `configKey` is in `camelCase` or `kebab-case`
+  - Both are available, so use whichever is more convenient
+</Accordion>
+
+## Script Best Practices
+
+### Error Handling
+
+```bash
+#!/bin/bash
+# Exit on first error
+set -e
+
+# Optional: trace commands (for debugging)
+# set -x
+
+# Capture errors and clean up
+trap 'echo "❌ Script failed at line $LINENO"' ERR
+
+echo "Running setup..."
+# Your commands here
+```
+
+### Idempotency
+
+Make scripts safe to run multiple times:
+
+```bash
+#!/bin/bash
+set -e
+
+# Check if already done
+if [ -f ".setup-complete" ]; then
+  echo "✅ Setup already complete, skipping"
+  exit 0
+fi
+
+# Do work
+echo "Running setup..."
+npm install
+npm run build
+
+# Mark as complete
+touch .setup-complete
+echo "✅ Setup complete"
+```
+
+### Non-Interactive Mode
+
+<Warning>
+Scripts run in **non-interactive mode** when executed by GitSpace. stdin is closed immediately, so prompts will fail.
+</Warning>
+
+```bash
+#!/bin/bash
+set -e
+
+# ❌ BAD: Will hang/fail
+# read -p "Enter value: " MY_VALUE
+
+# ✅ GOOD: Use bundle values or environment variables
+if [ -z "$MY_VALUE" ]; then
+  echo "❌ MY_VALUE not set. Configure in bundle.json onboarding."
+  exit 1
+fi
+
+echo "Using value: $MY_VALUE"
+```
+
+### Logging Output
+
+Provide clear feedback:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "📦 Installing dependencies..."
+npm install 2>&1 | grep -v "^npm WARN" || true
+
+echo "🔨 Building project..."
+npm run build
+
+echo "✅ Build complete"
+```
+
+### Timeouts
+
+Avoid long-running operations in `select/` scripts:
+
+```bash
+#!/bin/bash
+set -e
+
+# ✅ GOOD: Quick status check
+git fetch --quiet &
+FETCH_PID=$!
+
+# Wait max 5 seconds
+for i in {1..5}; do
+  if ! ps -p $FETCH_PID > /dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+# Kill if still running
+kill $FETCH_PID 2>/dev/null || true
+```
+
+## Debugging Scripts
+
+### View Script Output
+
+When scripts run in the TUI:
+- Real-time output is shown in a terminal view
+- Press `c` to cancel execution
+- Failed scripts show error details
+
+### Test Scripts Manually
+
+```bash
+# Navigate to workspace
+cd ~/gitspace/my-project/workspaces/my-workspace/
+
+# Run script manually
+./.gitspace/scripts/setup/01-install.sh my-workspace myorg/my-repo
+
+# Check exit code
+echo $?
+```
+
+### Enable Trace Mode
+
+```bash
+#!/bin/bash
+set -e
+set -x  # Print each command before executing
+
+echo "Starting setup..."
+# Commands will be traced
+```
+
+### Check Bundle Values
+
+```bash
+#!/bin/bash
+
+echo "=== Available Bundle Values ==="
+env | grep -E "^(API_|TEAM_|AWS_)" || echo "No bundle values found"
+echo "==============================="
+```
+
+## Migration Guide
+
+### Migrating from `pre/` to `setup/`
+
+<Steps>
+  <Step title="Identify Pre-Scripts">
+    List your existing pre-scripts:
+    
+    ```bash
+    ls -la .gitspace/scripts/pre/
+    ```
+  </Step>
+
+  <Step title="Move to Setup">
+    Rename and renumber:
+    
+    ```bash
+    mv .gitspace/scripts/pre/copy-env.sh \
+       .gitspace/scripts/setup/01-copy-env.sh
+    
+    mv .gitspace/scripts/pre/install.sh \
+       .gitspace/scripts/setup/02-install.sh
+    ```
+  </Step>
+
+  <Step title="Update Execution Order">
+    Verify the new order makes sense:
+    
+    ```bash
+    ls -1 .gitspace/scripts/setup/
+    # 01-copy-env.sh
+    # 02-install.sh
+    ```
+  </Step>
+
+  <Step title="Remove Pre Directory">
+    After verifying setup scripts work:
+    
+    ```bash
+    rm -rf .gitspace/scripts/pre/
+    ```
+  </Step>
+</Steps>
+
+## Advanced Examples
+
+### Conditional Execution
+
+```bash .gitspace/scripts/setup/01-conditional.sh
+#!/bin/bash
+set -e
+
+# Only run in production-like workspaces
+if [[ "$WORKSPACE_NAME" == prod-* ]]; then
+  echo "🚀 Production workspace detected"
+  npm run build:production
+else
+  echo "🔧 Development workspace"
+  npm run build:dev
+fi
+```
+
+### Parallel Execution
+
+```bash .gitspace/scripts/setup/02-parallel.sh
+#!/bin/bash
+set -e
+
+echo "Running tasks in parallel..."
+
+# Start background jobs
+npm install &
+PID1=$!
+
+pip install -r requirements.txt &
+PID2=$!
+
+# Wait for all
+wait $PID1
+echo "✅ npm install complete"
+
+wait $PID2
+echo "✅ pip install complete"
+
+echo "✅ All tasks complete"
+```
+
+### External Tool Integration
+
+```bash .gitspace/scripts/select/03-notify-slack.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+BRANCH=$(git branch --show-current)
+
+if [ -n "$SLACK_WEBHOOK" ]; then
+  curl -X POST "$SLACK_WEBHOOK" \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"text\": \"🚀 $USER started working on \\\`$BRANCH\\\` in \\\`$WORKSPACE_NAME\\\`\"
+    }" \
+    --silent --output /dev/null || true
+fi
+```

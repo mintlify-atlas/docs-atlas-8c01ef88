@@ -1,0 +1,537 @@
+---
+title: Workspace Configuration
+description: Configure workspace settings, scripts, and bundle options
+---
+
+## Overview
+
+Workspace configuration is managed through:
+- **Project config**: Global settings for all workspaces in a project
+- **Bundle config**: Repository-specific setup and scripts
+- **Custom scripts**: Convention-based automation
+
+## Configuration Files
+
+### Global Configuration
+
+Location: `~/gitspace/.config.json`
+
+```json
+{
+  "currentProject": "my-app",
+  "projectsDir": "/Users/username/gitspace",
+  "defaultBaseBranch": "main",
+  "staleDays": 30
+}
+```
+
+**Fields:**
+- `currentProject`: Currently active project (set by TUI)
+- `projectsDir`: Root directory for all projects
+- `defaultBaseBranch`: Default branch for new projects
+- `staleDays`: Days before workspace is marked stale
+
+### Project Configuration
+
+Location: `~/gitspace/<project-name>/.config.json`
+
+```json
+{
+  "name": "my-app",
+  "repository": "myorg/my-app",
+  "baseBranch": "main",
+  "linearApiKey": "lin_api_...",
+  "linearTeamKeys": ["ENG"],
+  "bundleValues": {
+    "teamName": "engineering",
+    "region": "us-west-2"
+  },
+  "bundleSecretKeys": ["apiKey", "dbPassword"],
+  "appliedBundle": {
+    "name": "my-app-bundle",
+    "version": "1.0",
+    "source": "/path/to/bundle",
+    "appliedAt": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+**Fields:**
+- `name`: Project identifier
+- `repository`: GitHub repository (owner/repo format)
+- `baseBranch`: Base branch for creating workspaces
+- `linearApiKey`: Linear API key for issue integration
+- `linearTeamKeys`: Linear team keys for fetching issues
+- `bundleValues`: Plain text values from bundle onboarding
+- `bundleSecretKeys`: Keys of secrets stored in OS keychain (values NOT in config)
+- `appliedBundle`: Metadata about the applied bundle
+
+<Warning>
+Secrets are stored in your OS keychain (macOS Keychain or Linux libsecret), not in configuration files.
+</Warning>
+
+## Bundle Configuration
+
+### Bundle Manifest
+
+Location: `.gitspace/bundle.json` (in repository)
+
+```json
+{
+  "version": "1.0",
+  "name": "my-app-bundle",
+  "description": "Setup bundle for my-app",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome",
+      "description": "Let's get you set up!"
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js",
+      "description": "Node.js 18+ is required",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Enter your API key",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team-name",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Enter your team name",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    }
+  ]
+}
+```
+
+### Onboarding Step Types
+
+<Tabs>
+  <Tab title="info">
+    Display informational message (no input required):
+
+    ```json
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to GitSpace",
+      "description": "This setup will configure your development environment."
+    }
+    ```
+  </Tab>
+
+  <Tab title="confirm">
+    Verify a dependency is installed:
+
+    ```json
+    {
+      "id": "docker",
+      "type": "confirm",
+      "title": "Docker",
+      "description": "Docker is required for running services",
+      "checkCommand": "docker",
+      "installUrl": "https://docker.com"
+    }
+    ```
+
+    GitSpace will:
+    1. Check if `docker` command exists in PATH
+    2. Prompt user to confirm installation
+    3. Show install URL if not found
+  </Tab>
+
+  <Tab title="input">
+    Collect a plain text value:
+
+    ```json
+    {
+      "id": "team-name",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Enter your team name",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    }
+    ```
+
+    - Value stored in project config (`bundleValues.teamName`)
+    - Available in scripts as `$teamName` and `$TEAM_NAME`
+  </Tab>
+
+  <Tab title="secret">
+    Collect a sensitive value (masked input):
+
+    ```json
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Enter your API key",
+      "configKey": "apiKey"
+    }
+    ```
+
+    - Value stored in OS keychain (NOT in config files)
+    - Key name stored in `bundleSecretKeys` array
+    - Available in scripts as `$apiKey` and `$API_KEY`
+  </Tab>
+</Tabs>
+
+### Bundle Values
+
+Bundle values collected during onboarding are available in scripts:
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/01-configure.sh
+
+# Direct access (exact configKey from bundle.json)
+echo "Team: $teamName"
+echo "Region: $region"
+
+# Normalized access (uppercase snake-case)
+echo "Team: $TEAM_NAME"
+echo "Region: $REGION"
+
+# Secrets (from OS keychain)
+if [ -n "$apiKey" ]; then
+  curl -H "Authorization: Bearer $apiKey" https://api.example.com
+fi
+```
+
+## Custom Scripts
+
+GitSpace uses convention-based scripts located in each workspace:
+
+```
+~/gitspace/<project>/workspaces/<workspace>/.gitspace/
+└── scripts/
+    ├── pre/       # Deprecated: migrate to setup/
+    ├── setup/     # Run when setup state changes
+    ├── select/    # Run on each session attach
+    └── remove/    # Run before workspace deletion
+```
+
+### Script Execution Rules
+
+<Steps>
+  <Step title="Make Executable">
+    Scripts must have execute permission:
+
+    ```bash
+    chmod +x .gitspace/scripts/setup/*.sh
+    chmod +x .gitspace/scripts/select/*.sh
+    chmod +x .gitspace/scripts/remove/*.sh
+    ```
+  </Step>
+
+  <Step title="Naming Convention">
+    Scripts run alphabetically. Use prefixes for ordering:
+
+    ```bash
+    setup/
+    ├── 01-install-deps.sh
+    ├── 02-build.sh
+    └── 03-migrate-db.sh
+    ```
+  </Step>
+
+  <Step title="Script Arguments">
+    Scripts receive standard arguments:
+
+    ```bash
+    #!/bin/bash
+    WORKSPACE_NAME=$1  # e.g., "my-feature"
+    REPOSITORY=$2      # e.g., "myorg/my-app"
+
+    echo "Workspace: $WORKSPACE_NAME"
+    echo "Repository: $REPOSITORY"
+    ```
+  </Step>
+
+  <Step title="Working Directory">
+    Scripts run with the workspace directory as CWD:
+
+    ```bash
+    #!/bin/bash
+    # You're already in ~/gitspace/my-app/workspaces/my-feature
+    pwd  # /home/user/gitspace/my-app/workspaces/my-feature
+    ls   # Lists workspace files
+    ```
+  </Step>
+</Steps>
+
+### Script Phases
+
+<CodeGroup>
+```bash Setup Scripts
+# .gitspace/scripts/setup/01-install-deps.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Installing dependencies for $WORKSPACE_NAME..."
+npm install
+npm run build
+
+# Run when:
+# - Workspace is created
+# - Bundle configuration changes
+# - Manual: gssh workspace bundle refresh
+```
+
+```bash Select Scripts
+# .gitspace/scripts/select/01-status.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Workspace: $WORKSPACE_NAME"
+git fetch --quiet
+git status --short
+
+# Run every time you:
+# - Attach to workspace session
+# - Switch to workspace in TUI
+```
+
+```bash Remove Scripts
+# .gitspace/scripts/remove/01-cleanup.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Cleaning up $WORKSPACE_NAME..."
+rm -rf node_modules/.cache
+rm -rf .next
+
+# Run when:
+# - Workspace is deleted
+# - Before: gssh workspace remove
+```
+</CodeGroup>
+
+### Pre Scripts (Deprecated)
+
+The `pre/` directory is deprecated. Migrate scripts to `setup/`:
+
+```bash
+# Old (deprecated)
+.gitspace/scripts/pre/01-copy-env.sh
+
+# New (recommended)
+.gitspace/scripts/setup/01-copy-env.sh
+```
+
+## Setup State Management
+
+GitSpace tracks workspace setup state using a marker file:
+
+### Setup Marker
+
+Location: `gitspace.lock` (in workspace root)
+
+This file is created after:
+- Initial workspace creation
+- Successful setup script execution
+- Bundle onboarding completion
+
+**When setup runs:**
+1. Workspace created for first time → Run setup scripts
+2. Bundle config changes → Run setup scripts
+3. `gitspace.lock` missing → Run setup scripts
+4. Manual trigger: `gssh workspace bundle refresh --force`
+
+### Bundle Refresh
+
+Re-run bundle onboarding and setup scripts:
+
+```bash
+# Refresh only if bundle changed
+gssh workspace bundle refresh --project my-app --workspace my-feature
+
+# Force refresh even if no changes
+gssh workspace bundle refresh --project my-app --workspace my-feature --force
+```
+
+This will:
+1. Prompt for new/changed onboarding values (with previous values as defaults)
+2. Update bundle values in project config
+3. Run setup scripts
+4. Update `gitspace.lock`
+
+## Linear Integration
+
+### Setup Linear
+
+Configure Linear API for a project:
+
+```bash
+gssh user config linear setup --project my-app
+```
+
+You'll be prompted for:
+- Linear API key
+- Team keys (comma-separated)
+
+### Configuration Storage
+
+Linear settings are stored in project config:
+
+```json
+{
+  "linearApiKey": "lin_api_...",
+  "linearTeamKeys": ["ENG", "PROD"]
+}
+```
+
+### View/Clear Settings
+
+```bash
+# Show Linear configuration
+gssh user config linear show --project my-app
+
+# Clear Linear configuration
+gssh user config linear clear --project my-app
+```
+
+## Examples
+
+<CodeGroup>
+```json Minimal Bundle
+{
+  "version": "1.0",
+  "name": "simple-app",
+  "description": "Simple app setup",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome",
+      "description": "Let's get started!"
+    }
+  ]
+}
+```
+
+```json Full Bundle
+{
+  "version": "1.0",
+  "name": "enterprise-app",
+  "description": "Enterprise app with all features",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome",
+      "description": "Enterprise app setup wizard"
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js 18+",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "docker",
+      "type": "confirm",
+      "title": "Docker",
+      "checkCommand": "docker",
+      "installUrl": "https://docker.com"
+    },
+    {
+      "id": "aws-region",
+      "type": "input",
+      "title": "AWS Region",
+      "configKey": "awsRegion",
+      "defaultValue": "us-west-2"
+    },
+    {
+      "id": "aws-access-key",
+      "type": "secret",
+      "title": "AWS Access Key",
+      "configKey": "awsAccessKey"
+    },
+    {
+      "id": "aws-secret-key",
+      "type": "secret",
+      "title": "AWS Secret Key",
+      "configKey": "awsSecretKey"
+    }
+  ]
+}
+```
+
+```bash Complete Setup Script
+#!/bin/bash
+# .gitspace/scripts/setup/01-full-setup.sh
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+set -e  # Exit on error
+
+echo "Setting up $WORKSPACE_NAME..."
+
+# Install dependencies
+echo "Installing dependencies..."
+npm install
+
+# Copy environment template
+if [ ! -f .env ]; then
+  echo "Creating .env from template..."
+  cp .env.example .env
+  
+  # Inject bundle values
+  if [ -n "$awsRegion" ]; then
+    echo "AWS_REGION=$awsRegion" >> .env
+  fi
+  
+  if [ -n "$awsAccessKey" ]; then
+    echo "AWS_ACCESS_KEY_ID=$awsAccessKey" >> .env
+  fi
+  
+  if [ -n "$awsSecretKey" ]; then
+    echo "AWS_SECRET_ACCESS_KEY=$awsSecretKey" >> .env
+  fi
+fi
+
+# Build project
+echo "Building project..."
+npm run build
+
+# Run database migrations
+if [ -n "$dbPassword" ]; then
+  echo "Running migrations..."
+  npm run migrate
+fi
+
+echo "Setup complete!"
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Session Mode" icon="terminal" href="/workspace/session-mode">
+    Learn about workspace session mode and the space function
+  </Card>
+  <Card title="Creating Workspaces" icon="plus" href="/workspace/creating">
+    Create and configure new workspaces
+  </Card>
+</CardGroup>

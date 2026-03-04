@@ -1,0 +1,415 @@
+---
+title: Directory Structure
+description: Detailed directory structure and file organization of GitSpace CLI
+---
+
+This page documents the complete directory structure of the GitSpace CLI codebase.
+
+## Source Code Overview
+
+```
+src/
+├── index.ts                    # Entry point (TUI or CLI dispatch)
+├── app.tui.tsx                 # TUI application (OpenTUI)
+├── app.web.tsx                 # Web application (React)
+├── commands/                   # CLI command implementations
+├── core/                       # Core business logic
+├── lib/                        # Shared libraries
+├── relay/                      # Relay server
+├── serve/                      # Machine daemon
+├── session/                    # Session management
+├── types/                      # TypeScript type definitions
+├── utils/                      # Utility functions
+├── tui/                        # TUI-specific components
+├── components/                 # Shared UI components
+├── hooks/                      # React/TUI hooks
+└── cli/                        # CLI utilities
+```
+
+## Commands Directory
+
+The `src/commands/` directory contains all CLI command implementations (17 files):
+
+<AccordionGroup>
+  <Accordion title="Workspace Management Commands">
+    - **`add.ts`** - Add projects and workspaces
+    - **`list.ts`** - List projects and workspaces
+    - **`remove.ts`** - Remove projects and workspaces
+    - **`switch.ts`** - Switch between projects and workspaces
+    - **`directory.ts`** - Get project directory path
+  </Accordion>
+
+  <Accordion title="Identity & Access Commands">
+    - **`identity.ts`** - Identity management (init/show)
+    - **`access.ts`** - Access control list (add/list/remove)
+    - **`invite.ts`** - Root-signed invite management
+  </Accordion>
+
+  <Accordion title="Remote Access Commands">
+    - **`serve.ts`** - Machine daemon for remote access
+    - **`connect.ts`** - Connect to remote machine
+    - **`machine.ts`** - Remote machine management (enroll/list)
+    - **`relay.ts`** - Relay server (start/token)
+    - **`tmux.ts`** - tmux-lite CLI commands
+    - **`status.ts`** - Unified daemon status display
+  </Accordion>
+
+  <Accordion title="Integration Commands">
+    - **`auth.ts`** - GitHub OAuth for gitspace.sh
+    - **`host.ts`** - Subdomain hosting (reserve/release/list)
+    - **`linear.ts`** - Linear integration (setup/show/clear)
+  </Accordion>
+</AccordionGroup>
+
+## Core Business Logic
+
+The `src/core/` directory contains core business logic modules (8 files):
+
+| File | Purpose | Key Functions |
+|------|---------|---------------|
+| `config.ts` | Configuration management | Load/save global and project configs |
+| `git.ts` | Git operations | Worktree creation, branch management |
+| `identity.ts` | Machine identity | Generate/load identity keypairs |
+| `github.ts` | GitHub API | Repository operations via `gh` CLI |
+| `linear.ts` | Linear API | Issue/team integration |
+| `access.ts` | Access control | Manage authorized users |
+| `bundle.ts` | Project templates | Bundle onboarding and refresh |
+| `shell.ts` | Subshell spawning | Interactive shell sessions |
+
+## Libraries
+
+### tmux-lite Library
+
+The `src/lib/tmux-lite/` directory implements the terminal multiplexer:
+
+```
+lib/tmux-lite/
+├── server.ts               # Session manager with xterm-headless
+├── cli.ts                  # CLI interface for tmux-lite
+├── protocol.ts             # Frame format (PTY/CONTROL)
+├── handshake-handler.ts    # X3DH handshake management
+├── relay-client.ts         # WebSocket client for relay
+└── crypto/                 # Cryptography implementations
+    ├── identity.ts         # Ed25519/X25519 key generation
+    ├── keyexchange.ts      # X25519 ECDH
+    ├── secretbox.ts        # AES-256-GCM encryption
+    ├── frames.ts           # Encrypted frame format
+    ├── handshake.ts        # X3DH protocol steps
+    ├── device-cert.ts      # Device certificate verification
+    ├── user-identity.ts    # User root identity (BIP39)
+    ├── root-invites.ts     # Signed root invite tokens
+    ├── access-control.ts   # ACL checking
+    ├── keys.ts             # Key derivation utilities
+    └── index.ts            # Crypto module exports
+```
+
+<Note>
+The crypto implementations are designed to be portable between Node.js and browser environments.
+</Note>
+
+### Remote Session Library
+
+The `src/lib/remote-session/` directory handles remote session management:
+
+- **`session-handler.ts`** - Handle remote client commands
+- **`workspace-scanner.ts`** - Scan workspace info for remote clients
+
+## Relay Server
+
+The `src/relay/` directory implements the WebSocket relay server (8 files):
+
+<Tabs>
+  <Tab title="Core">
+    - **`index.ts`** - Entry point and server setup
+    - **`server.ts`** - WebSocket routing server
+    - **`protocol.ts`** - Message types and validation
+    - **`types.ts`** - WebSocketData, RelayConfig types
+  </Tab>
+  <Tab title="Registries">
+    - **`registries.ts`** - Machine/invite/auth/global access registries
+    - **`jwt.ts`** - JWT token creation/verification (HMAC + Ed25519)
+    - **`pipes.ts`** - Pipe abstraction for data routing
+  </Tab>
+</Tabs>
+
+### Protocol Message Types
+
+The relay protocol supports these message categories:
+
+1. **Machine → Relay**: `register_machine`, `unlock_request`, `data`
+2. **Client → Relay**: `unlock_relay`, `list_machines`, `connect_to_machine`, `create_root_invite`, `owner_sync_*`
+3. **Relay → Machine**: `relay_identity`, `challenge`, `registered`, `client_connected`, `data`
+4. **Relay → Client**: `machine_list`, `connection_established`, `root_invite_created`, `owner_sync_*_result`
+
+## Machine Daemon
+
+The `src/serve/` directory implements the machine daemon (4 files):
+
+| File | Purpose |
+|------|----------|
+| `daemon.ts` | Daemon lifecycle (PID files, status socket) |
+| `client-session-manager.ts` | Client connection handling |
+| `pty-session.ts` | PTY session management |
+| `types.ts` | ServeOptions, permissions types |
+
+## Session Management
+
+The `src/session/` directory handles session coordination:
+
+```
+session/
+├── manager.ts              # Session lifecycle management
+├── registry.ts             # Active session registry
+├── workspace-context.ts    # Workspace context resolution
+└── types.ts                # Session types
+```
+
+## Shared Components
+
+The `src/components/` directory contains cross-platform UI components:
+
+### Component Pattern
+
+Each component follows a three-file pattern:
+
+```
+components/
+├── MachineList.tsx         # Logic + hooks
+├── MachineList.web.tsx     # Web rendering (React DOM)
+├── MachineList.tui.tsx     # TUI rendering (OpenTUI)
+├── SpacesBrowser.tsx       # Workspace browser logic
+├── SpacesBrowser.web.tsx
+├── SpacesBrowser.tui.tsx
+├── Inbox.tsx               # Notification system
+├── Inbox.web.tsx
+├── Inbox.tui.tsx
+├── Flow.tsx                # Modal dialog system
+├── Flow.web.tsx
+├── Flow.tui.tsx
+├── ProjectList.tsx
+├── ProjectList.web.tsx
+└── ProjectList.tui.tsx
+```
+
+<Accordion title="Why Three Files?">
+This pattern allows:
+- **Shared business logic** - Common hooks and state management
+- **Platform-specific rendering** - Optimized for TUI or web
+- **Type safety** - TypeScript enforces consistent interfaces
+- **Code reuse** - Logic written once, rendered twice
+</Accordion>
+
+## Type Definitions
+
+The `src/types/` directory contains all TypeScript type definitions:
+
+| File | Purpose |
+|------|----------|
+| `identity.ts` | Keypairs, access, invites, X3DH |
+| `config.ts` | Global/project config |
+| `workspace.ts` | Workspace types |
+| `bundle.ts` | Bundle format |
+| `errors.ts` | Error types |
+| `events.ts` | Event types |
+| `lifecycle.ts` | Lifecycle types |
+| `processes.ts` | Process types |
+| `script-phase.ts` | Script phase types |
+| `workspace-fuzzy.ts` | Fuzzy search types |
+
+### Key Type Definitions
+
+<CodeGroup>
+```typescript Identity Types
+// src/types/identity.ts
+export interface Identity {
+  id: string;
+  signing: SigningKeypair;      // Ed25519
+  keyExchange: KeyExchangeKeypair; // X25519
+  label?: string;
+  createdAt: number;
+}
+
+export interface SigningKeypair {
+  publicKey: Uint8Array;  // 32 bytes
+  secretKey: Uint8Array;  // 64 bytes
+}
+
+export interface KeyExchangeKeypair {
+  publicKey: Uint8Array;  // 32 bytes
+  privateKey: Uint8Array; // 32 bytes
+}
+```
+
+```typescript Session Keys
+// src/types/identity.ts
+export interface SessionKeys {
+  sendKey: Uint8Array;     // 32 bytes, AES-256
+  receiveKey: Uint8Array;  // 32 bytes, AES-256
+  sessionId: string;
+}
+```
+
+```typescript Config Types
+// src/types/config.ts
+export interface GlobalConfig {
+  currentProject?: string;
+  baseBranch?: string;
+  staleWorkspaceDays?: number;
+}
+
+export interface ProjectConfig {
+  name: string;
+  repository: string;
+  baseBranch: string;
+  workspaces: WorkspaceConfig[];
+}
+```
+</CodeGroup>
+
+## Utility Functions
+
+The `src/utils/` directory contains utility functions (13 files):
+
+<Tabs>
+  <Tab title="Core Utils">
+    - **`logger.ts`** - Colored logging with levels
+    - **`prompts.ts`** - User prompts (input, select, confirm)
+    - **`deps.ts`** - Dependency checking (git, gh)
+    - **`secrets.ts`** - Bun.secrets integration for keychain
+  </Tab>
+  <Tab title="Data Utils">
+    - **`fuzzy-match.ts`** - Fuzzy string matching
+    - **`sanitize.ts`** - String sanitization
+    - **`shell-escape.ts`** - POSIX shell escaping
+    - **`markdown.ts`** - Markdown rendering for terminal
+  </Tab>
+  <Tab title="Workspace Utils">
+    - **`run-scripts.ts`** - Script discovery and execution
+    - **`run-commands.ts`** - Command execution with output
+    - **`workspace-state.ts`** - gitspace.lock marker management
+    - **`onboarding.ts`** - Bundle onboarding flows
+  </Tab>
+  <Tab title="Network Utils">
+    - **`bun-socket-writer.ts`** - Buffered socket writing
+  </Tab>
+</Tabs>
+
+## File System Layout
+
+GitSpace uses a well-defined file system structure:
+
+### User Data Directory
+
+```
+~/gitspace/
+├── .config.json            # Global configuration
+├── .identity/              # User and machine identities
+│   ├── keypair.json        # Encrypted identity keypair
+│   ├── machine.json        # Machine registration info
+│   └── relay.json          # Relay configuration cache
+├── .relay/                 # Relay server data
+│   └── control/
+│       └── control.db      # ACL + invite state (SQLite)
+├── .serve/                 # Machine daemon state
+│   ├── serve.pid           # Daemon PID file
+│   └── status.sock         # Status socket
+├── host.json               # gitspace.sh subdomain config
+└── <project-name>/         # Project directories
+    ├── .git/               # Base repository
+    ├── .config.json        # Project config
+    └── workspaces/         # Workspace worktrees
+        └── <workspace>/
+            ├── .git        # Worktree link
+            ├── .gitspace/  # Workspace config
+            └── gitspace.lock # State marker
+```
+
+### Temporary Data
+
+```
+/tmp/
+└── tmux-lite-sessions/     # Session data (configurable)
+    └── <session-id>/
+        ├── state.json      # Session state
+        └── buffer          # Terminal buffer
+```
+
+<Note>
+The tmux-lite session directory can be configured via the `TMUX_LITE_SESSION_DIR` environment variable.
+</Note>
+
+## Build Output
+
+```
+dist/
+├── index.js                # CLI entry point (bundled)
+├── relay.js                # Relay server (bundled)
+├── serve.js                # Machine daemon (bundled)
+└── web/                    # Web application build
+    ├── index.html
+    ├── assets/
+    │   ├── index-[hash].js
+    │   └── index-[hash].css
+    └── crypto/             # Crypto WASM/JS bundles
+```
+
+## Configuration Files
+
+### Global Config
+
+**Location**: `~/gitspace/.config.json`
+
+```json
+{
+  "currentProject": "my-project",
+  "baseBranch": "main",
+  "staleWorkspaceDays": 30
+}
+```
+
+### Project Config
+
+**Location**: `~/gitspace/<project>/.config.json`
+
+```json
+{
+  "name": "my-project",
+  "repository": "git@github.com:user/repo.git",
+  "baseBranch": "main",
+  "workspaces": [
+    {
+      "name": "feature-login",
+      "branch": "feature/login",
+      "createdAt": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `RELAY_PORT` | Relay server port | `4480` |
+| `RELAY_BIND` | Relay bind address | `0.0.0.0` |
+| `RELAY_PRIVATE_KEY` | Base64 Ed25519 private key | Uses keychain |
+| `RELAY_LABEL` | Label for relay identity | None |
+| `GITSPACE_API_URL` | gitspace.sh API URL | `https://api.gitspace.sh` |
+| `TMUX_LITE_SESSION_DIR` | Session data directory | `/tmp/tmux-lite-sessions` |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    Return to the system architecture overview
+  </Card>
+  <Card title="Encryption" icon="lock" href="/architecture/encryption">
+    Learn about cryptographic protocols and implementations
+  </Card>
+  <Card title="Protocol" icon="network-wired" href="/architecture/protocol">
+    Understand the relay protocol and message formats
+  </Card>
+  <Card title="Development" icon="code" href="/advanced/development">
+    Set up a development environment
+  </Card>
+</CardGroup>

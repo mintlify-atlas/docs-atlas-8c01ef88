@@ -1,0 +1,202 @@
+---
+title: gssh relay machines
+description: Manage machines registered to your relay server
+---
+
+## Overview
+
+Manage the machines that have enrolled with your relay server. Machines must be registered before they can connect and accept client sessions.
+
+## Commands
+
+### List Registered Machines
+
+List all machines that have enrolled with this relay.
+
+```bash
+gssh relay machines list [--json]
+```
+
+#### Options
+
+<ParamField path="--json" type="boolean">
+  Output in JSON format for scripting and automation.
+</ParamField>
+
+#### Example Output
+
+<CodeGroup>
+```bash Default view
+Relay Machines:
+
+MACHINE ID           LABEL                    LAST CONNECTED
+────────────────────────────────────────────────────────────
+mach_abc123def456    Brad's MacBook Pro       2024-01-15
+mach_789ghi012jkl    Production Server        2024-01-14
+mach_mno345pqr678    Development VM           2024-01-10
+```
+
+```json JSON output
+[
+  {
+    "machineId": "mach_abc123def456",
+    "label": "Brad's MacBook Pro",
+    "lastConnectedAt": "2024-01-15T10:30:00Z"
+  },
+  {
+    "machineId": "mach_789ghi012jkl",
+    "label": "Production Server",
+    "lastConnectedAt": "2024-01-14T22:15:00Z"
+  }
+]
+```
+</CodeGroup>
+
+<Note>
+  If no machines are registered, you'll see:
+  ```
+  No machines registered for this owner.
+  ```
+</Note>
+
+### Revoke Machine Access
+
+Remove a machine from the relay registry. The machine will no longer be able to connect until re-enrolled.
+
+```bash
+gssh relay machines revoke <machine-id>
+```
+
+#### Arguments
+
+<ParamField path="machine-id" type="string" required>
+  The unique machine identifier (e.g., `mach_abc123def456`). Get this from `gssh relay machines list`.
+</ParamField>
+
+#### Example
+
+```bash
+gssh relay machines revoke mach_abc123def456
+```
+
+**Output:**
+```
+Removed machine mach_abc123def456
+```
+
+<Warning>
+  **Revoking a machine is immediate.** Any active connections from that machine will be terminated, and it won't be able to reconnect until re-enrolled with a new invite.
+</Warning>
+
+## Machine Enrollment
+
+Machines register with the relay through an enrollment process:
+
+1. **Relay owner creates invite:**
+   ```bash
+   gssh invite relay-machine create \
+     --relay wss://relay.example.com/ws \
+     --machine-signing-key <signing-pub-key> \
+     --machine-key-exchange-key <exchange-pub-key>
+   ```
+
+2. **Machine accepts invite:**
+   ```bash
+   gssh machine enroll --invite <token>
+   ```
+
+3. **Machine appears in registry:**
+   ```bash
+   gssh relay machines list
+   ```
+
+## Machine Information
+
+Each registered machine stores:
+
+<ParamField path="machineId" type="string">
+  Unique identifier derived from the machine's signing public key.
+</ParamField>
+
+<ParamField path="label" type="string">
+  Human-readable label for the machine (optional, set during enrollment).
+</ParamField>
+
+<ParamField path="lastConnectedAt" type="string">
+  ISO 8601 timestamp of the last successful connection.
+</ParamField>
+
+## Storage Location
+
+Machine registry is stored in:
+```
+~/.gitspace/.relay/control/control.db
+```
+
+<Note>
+  This is a JSON-based database that tracks machines, invites, and ACLs. Back it up regularly if you're running a production relay.
+</Note>
+
+## Access Control
+
+Only machines with:
+- Valid enrollment (created via invite)
+- Matching owner user root ID
+- Ed25519 signing key matching their machine ID
+
+can connect to the relay.
+
+## Use Cases
+
+### Audit Connected Machines
+
+Regularly review which machines have access:
+
+```bash
+gssh relay machines list
+```
+
+### Remove Compromised Machine
+
+If a machine is lost or compromised:
+
+```bash
+# List machines to find the ID
+gssh relay machines list
+
+# Revoke access
+gssh relay machines revoke mach_abc123def456
+```
+
+### Export Machine List
+
+For auditing or backup:
+
+```bash
+gssh relay machines list --json > machines-backup.json
+```
+
+## Troubleshooting
+
+### "Machine not found for this owner"
+
+The machine ID doesn't exist in the registry, or belongs to a different owner. Verify:
+
+1. You're running the command on the correct relay
+2. The machine ID is spelled correctly
+3. You have the user root identity that owns this relay
+
+### Machines not appearing
+
+If a machine enrolled but doesn't appear:
+
+1. **Check identity:** Ensure `gssh user identity show` shows the same identity on both relay and machine
+2. **Check enrollment:** Machine should have successfully accepted the invite
+3. **Check storage:** Verify `~/.gitspace/.relay/control/control.db` exists and has correct permissions
+
+## Related Commands
+
+- [gssh relay start](/cli/relay/start) - Start the relay server
+- `gssh invite relay-machine create` - Create enrollment invite
+- `gssh machine enroll` - Enroll this machine with a relay
+- `gssh user identity show` - Show your user root identity

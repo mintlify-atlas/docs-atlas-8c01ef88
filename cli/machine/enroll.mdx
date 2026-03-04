@@ -1,0 +1,237 @@
+---
+title: "gssh machine enroll"
+description: "Enroll this machine with a relay using a relay-machine invite token"
+---
+
+## Overview
+
+The `gssh machine enroll` command registers your machine identity with a relay server using a root-signed invite token. This establishes trust and allows the machine to connect to the relay when running `gssh machine serve start`.
+
+<Note>
+  Enrollment is a one-time setup step. After enrollment, the relay URL and machine ID are saved to `~/.gitspace/.identity/relay.json`.
+</Note>
+
+## Usage
+
+```bash
+gssh machine enroll --invite <token> [--label <name>]
+```
+
+### Arguments
+
+<ParamField path="--invite" type="string" required>
+  Relay-machine invite token. Can be:
+  - A raw token: `gssh-invite:relay-machine:...`
+  - A URL with embedded token: `https://relay.example.com/#token=gssh-invite:...`
+  - A URL with query param: `https://relay.example.com/?invite=gssh-invite:...`
+</ParamField>
+
+<ParamField path="--label" type="string">
+  Human-readable label for this machine (e.g., "dev-laptop", "ci-runner-01"). Defaults to the machine identity label.
+</ParamField>
+
+---
+
+## How It Works
+
+<Steps>
+  <Step title="Parse invite token">
+    Extracts relay URL and target machine keys from the root-signed invite.
+  </Step>
+  
+  <Step title="Verify machine identity">
+    Confirms your local identity matches the invite's target signing and key exchange keys.
+  </Step>
+  
+  <Step title="Connect to relay">
+    Opens WebSocket connection with `?role=machine` parameter.
+  </Step>
+  
+  <Step title="Trust verification">
+    Prompts to trust relay fingerprint (or auto-trusts localhost).
+  </Step>
+  
+  <Step title="Challenge-response auth">
+    Signs relay's nonce challenge with Ed25519 private key to prove identity ownership.
+  </Step>
+  
+  <Step title="Register machine">
+    Sends `register_machine` message with signed challenge response and invite token.
+  </Step>
+  
+  <Step title="Save configuration">
+    Persists relay URL and machine ID to `~/.gitspace/.identity/relay.json` and `~/.gitspace/.identity/machine.json`.
+  </Step>
+</Steps>
+
+---
+
+## Invite Token Format
+
+Relay-machine invite tokens are created by relay owners:
+
+```bash
+gssh invite relay-machine create \
+  --relay wss://relay.example.com/ws \
+  --machine-signing-key <base64-key> \
+  --machine-key-exchange-key <base64-key>
+```
+
+The token encodes:
+- Relay URL
+- Target machine signing public key
+- Target machine key exchange public key
+- Owner user root ID
+- Cryptographic signature
+
+<Warning>
+  The invite token binds to a specific machine identity. You must enroll with the identity whose public keys match the invite.
+</Warning>
+
+---
+
+## Examples
+
+### Basic Enrollment
+
+```bash
+gssh machine enroll --invite gssh-invite:relay-machine:...
+```
+
+Output:
+```
+Enrolling machine abc123... with relay...
+Machine enrollment complete
+  Machine: abc123...
+  Relay:   wss://relay.example.com/ws
+```
+
+### Enrollment with Label
+
+```bash
+gssh machine enroll \
+  --invite gssh-invite:relay-machine:... \
+  --label dev-workstation
+```
+
+### Enrollment from URL
+
+```bash
+gssh machine enroll \
+  --invite "https://relay.example.com/#token=gssh-invite:relay-machine:..."
+```
+
+The relay URL is extracted from the link, ensuring it matches the invite's embedded relay URL.
+
+---
+
+## Relay Trust
+
+On first enrollment:
+
+### Localhost Relay
+
+```
+[enroll] Localhost relay - auto-trusting
+```
+
+### Remote Relay
+
+```
+Unknown Relay
+  URL:         wss://relay.example.com/ws
+  Fingerprint: a3f8...d2c1
+  Label:       Production Relay
+
+Trust this relay? (Y/n)
+```
+
+After trusting, the relay public key is saved to `~/.gitspace/.identity/trusted-relays.json`.
+
+<Note>
+  If the relay's public key changes, enrollment will fail with a security error. Remove the old entry from `trusted-relays.json` if this is expected.
+</Note>
+
+---
+
+## Troubleshooting
+
+### "This invite is for a different machine identity"
+
+The invite token targets a specific machine identity. Ensure you:
+
+1. Have initialized your user root identity: `gssh user identity init`
+2. Are using the correct identity (check with `gssh user identity show`)
+3. Received an invite created for your machine's public keys
+
+### "Relay identity mismatch"
+
+The relay's public key changed since you last trusted it. Options:
+
+1. Verify the fingerprint with the relay operator
+2. Remove old entry: Edit `~/.gitspace/.identity/trusted-relays.json`
+3. Re-run enrollment
+
+### "Timed out waiting for relay enrollment response"
+
+Relay connection issues:
+
+- Verify relay URL is reachable
+- Check firewall/network settings
+- Confirm relay is running (`gssh relay start` on relay host)
+
+---
+
+## Configuration Files
+
+### Relay Config
+
+**Location**: `~/.gitspace/.identity/relay.json`
+
+```json
+{
+  "relayUrl": "wss://relay.example.com/ws",
+  "machineId": "abc123...",
+  "savedAt": 1234567890000
+}
+```
+
+### Machine Info
+
+**Location**: `~/.gitspace/.identity/machine.json`
+
+```json
+{
+  "machineId": "abc123...",
+  "machineName": "dev-workstation",
+  "relayUrl": "wss://relay.example.com/ws",
+  "registeredAt": "2026-03-04T12:34:56.789Z"
+}
+```
+
+### Trusted Relays
+
+**Location**: `~/.gitspace/.identity/trusted-relays.json`
+
+```json
+{
+  "relays": [
+    {
+      "url": "wss://relay.example.com/ws",
+      "publicKey": "base64-encoded-key",
+      "fingerprint": "a3f8...d2c1",
+      "label": "Production Relay",
+      "trustedAt": 1234567890000
+    }
+  ]
+}
+```
+
+---
+
+## Related Commands
+
+- [`gssh user identity init`](/cli/user/identity) - Initialize machine identity
+- [`gssh machine serve start`](/cli/machine/serve) - Start daemon with enrolled relay
+- [`gssh invite relay-machine create`](/cli/invite) - Create enrollment invite (relay owner)
+- [`gssh relay machines list`](/cli/relay/machines) - View enrolled machines (relay owner)

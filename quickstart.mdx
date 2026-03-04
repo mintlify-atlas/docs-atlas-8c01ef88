@@ -1,80 +1,310 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with GitSpace in minutes
 ---
 
-## Get started in three steps
+This guide will walk you through creating your first project and workspace with GitSpace.
 
-Get your documentation site running locally and make your first customization.
+## Launch the TUI
 
-### Step 1: Set up your local environment
+The easiest way to use GitSpace is through its interactive Terminal User Interface (TUI):
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash
+gssh
+```
 
-### Step 2: Deploy your changes
+The TUI provides a two-panel interface:
+- **Left panel**: Your projects
+- **Right panel**: Workspaces in the selected project
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+### Key Bindings
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+| Key | Action |
+|-----|--------|
+| `Enter` | Select project / Open workspace |
+| `Tab` | Switch between panels |
+| `n` | New project / workspace |
+| `d` | Delete selected item |
+| `?` | Show help |
+| `q` | Quit |
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Create Your First Project
 
-### Step 3: Go live
+<Steps>
+  <Step title="Add a project">
+    You can add a project either through the TUI or CLI:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <CodeGroup>
+    ```bash TUI
+    # Launch TUI and press 'n' to create a new project
+    gssh
+    ```
 
-## Next steps
+    ```bash CLI
+    # Use the CLI directly
+    gssh project add
+    ```
+    </CodeGroup>
 
-Now that you have your docs running, explore these key features:
+    You'll be prompted to choose between:
+    - **Enter git remote URL** - Clone from any git repository
+    - **Choose GitHub repository** - Select from your GitHub repositories
+  </Step>
+
+  <Step title="Select a repository">
+    If you chose "Choose GitHub repository", GitSpace will fetch your repositories:
+
+    ```bash
+    Fetching repositories...
+    ? Select a repository: (Use arrow keys)
+    > myorg/awesome-project
+      myorg/another-project
+      personal/side-project
+    ```
+
+    <Info>
+    Use the `--org` flag to filter repositories by organization:
+    ```bash
+    gssh project add --org myorg
+    ```
+    </Info>
+  </Step>
+
+  <Step title="Clone and configure">
+    GitSpace will automatically:
+    - Clone the repository to `~/gitspace/<project-name>/base`
+    - Detect the default branch (usually `main` or `master`)
+    - Run onboarding steps if a bundle is present
+    - Create project configuration
+
+    ```bash
+    ✓ Cloning repository...
+    ✓ Detecting default branch: main
+    ✓ Project 'awesome-project' created successfully
+    ```
+  </Step>
+</Steps>
+
+## Create Your First Workspace
+
+Workspaces are isolated git worktrees for working on different features or branches simultaneously.
+
+<Steps>
+  <Step title="Create a workspace">
+    <CodeGroup>
+    ```bash TUI
+    # In TUI, select project and press 'n' in right panel
+    gssh
+    ```
+
+    ```bash CLI
+    # Create workspace with custom name
+    gssh workspace add my-feature --project awesome-project
+    ```
+    </CodeGroup>
+
+    <Note>
+    If you have Linear integration configured, you can create workspaces directly from Linear issues.
+    </Note>
+  </Step>
+
+  <Step title="Enter workspace details">
+    You'll be prompted for:
+    - **Workspace name** - Will be used for the directory and branch
+    - **Branch name** (optional) - Defaults to workspace name
+    - **Base branch** (optional) - Defaults to project's main branch
+
+    ```bash
+    ? Workspace name: feature/user-authentication
+    ? Create from branch: (main)
+    ```
+  </Step>
+
+  <Step title="Workspace creation">
+    GitSpace will:
+    - Create a new git worktree at `~/gitspace/<project>/workspaces/<workspace-name>/`
+    - Create and checkout a new branch
+    - Run setup scripts (if configured in `.gitspace/scripts/setup/`)
+    - Open the workspace in a new terminal session
+
+    ```bash
+    ✓ Creating worktree...
+    ✓ Checking out branch: feature/user-authentication
+    ✓ Running setup scripts...
+    ✓ Workspace ready!
+    ```
+  </Step>
+</Steps>
+
+## Working with Workspaces
+
+### Open a Workspace
+
+In the TUI, select a workspace and press `Enter` to open it in a new terminal session.
+
+```bash
+# Or use the CLI to list workspaces
+gssh workspace list --project awesome-project
+```
+
+**Example output:**
+
+```bash
+Workspaces in 'awesome-project':
+
+  feature/user-authentication    (branch: feature/user-authentication)
+  bugfix/login-error            (branch: bugfix/login-error)
+  main-workspace                (branch: main)
+```
+
+### Workspace Session Mode
+
+When you open a workspace, GitSpace injects a `space` shell function that provides workspace-scoped commands:
+
+```bash
+# Show workspace context
+space context
+
+# Show workspace context as JSON
+space context --json
+```
+
+<Warning>
+Inside a workspace session, regular `gssh` commands are restricted to prevent cross-workspace mistakes.
+</Warning>
+
+### View Workspace Status
+
+Get detailed information about a workspace:
+
+```bash
+gssh workspace context --project awesome-project --workspace feature/user-authentication
+```
+
+**Example output:**
+
+```json
+{
+  "project": "awesome-project",
+  "workspace": "feature/user-authentication",
+  "branch": "feature/user-authentication",
+  "path": "/Users/you/gitspace/awesome-project/workspaces/feature/user-authentication",
+  "hasUncommittedChanges": false,
+  "lastModified": "2026-03-01T10:30:00Z"
+}
+```
+
+## Common CLI Commands
+
+### Project Management
+
+```bash
+# List all projects
+gssh project list
+
+# List projects with details
+gssh project list --verbose --json
+
+# Remove a project
+gssh project remove awesome-project
+```
+
+### Workspace Management
+
+```bash
+# List workspaces in a project
+gssh workspace list --project awesome-project
+
+# Create workspace from specific branch
+gssh workspace add hotfix --project awesome-project --from production
+
+# Create workspace with different branch name
+gssh workspace add my-workspace --project awesome-project --branch feature/custom-name
+
+# Skip setup scripts
+gssh workspace add quick-test --project awesome-project --no-setup
+
+# Remove a workspace
+gssh workspace remove feature/user-authentication --project awesome-project
+```
+
+## Directory Structure
+
+After creating a project and workspace, your directory structure will look like:
+
+```bash
+~/gitspace/
+├── .config.json                          # Global configuration
+├── awesome-project/
+│   ├── .config.json                      # Project configuration
+│   ├── base/                             # Base repository clone
+│   │   └── ...                           # Your repo files
+│   └── workspaces/
+│       └── feature/user-authentication/  # Workspace (git worktree)
+│           ├── .gitspace/                # Bundle scripts (if configured)
+│           │   └── scripts/
+│           │       ├── setup/            # Run during workspace setup
+│           │       ├── select/           # Run when opening workspace
+│           │       └── remove/           # Run before deletion
+│           ├── gitspace.lock             # Setup completion marker
+│           └── ...                       # Your branch files
+```
+
+## Using Repo Config Bundles
+
+<Info>
+Repo config bundles allow teams to share onboarding configurations, setup scripts, and environment requirements.
+</Info>
+
+If your repository contains a `.gitspace/` directory with a `bundle.json` file, GitSpace will automatically:
+
+1. Detect the bundle during project creation
+2. Run onboarding steps (verify tools, collect secrets, etc.)
+3. Install scripts in each workspace
+4. Execute setup scripts when creating workspaces
+
+**Example bundle structure:**
+
+```
+.gitspace/
+├── bundle.json              # Onboarding configuration
+└── scripts/
+    ├── setup/
+    │   └── 01-install-deps.sh
+    ├── select/
+    │   └── 01-status.sh
+    └── remove/
+        └── 01-cleanup.sh
+```
+
+### Loading External Bundles
+
+You can also load bundles from external sources:
+
+```bash
+# From local directory
+gssh project add --bundle-path /path/to/bundle/
+
+# From remote URL
+gssh project add --bundle-url https://example.com/bundle.zip
+
+# Skip bundle detection
+gssh project add --skip-bundle
+```
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Linear Integration" icon="linear" href="/integrations/linear">
+    Connect Linear to create workspaces from issues
+  </Card>
+  <Card title="Remote Access" icon="terminal" href="/remote/overview">
+    Set up secure remote terminal access
+  </Card>
+  <Card title="Custom Scripts" icon="code" href="/guides/custom-scripts">
+    Configure workspace lifecycle scripts
+  </Card>
+  <Card title="CLI Reference" icon="book" href="/cli/project/add">
+    Explore all available commands
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

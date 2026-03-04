@@ -1,0 +1,350 @@
+---
+title: gssh user identity
+description: Manage your user root identity with BIP39 mnemonic-based cryptographic keys
+---
+
+## Overview
+
+The `gssh user identity` commands manage your user root identity, which is derived from a 24-word BIP39 mnemonic phrase. This identity provides:
+
+- **Ed25519 signing key** - Proves your identity when creating invites and authorizing access
+- **X25519 key exchange key** - Establishes end-to-end encrypted sessions
+- **Keychain storage** - Mnemonic stored securely in your OS keychain
+- **Recovery capability** - Restore identity on any device with your mnemonic phrase
+
+<Warning>
+  Your 24-word mnemonic is the **only way** to recover your identity. Write it down and store it safely offline. It cannot be retrieved after initial creation.
+</Warning>
+
+## Commands
+
+### gssh user identity init
+
+Create a new user root identity by generating a 24-word BIP39 mnemonic.
+
+```bash
+gssh user identity init [options]
+```
+
+<ParamField path="--force" type="boolean">
+  Overwrite existing identity. Requires confirmation prompt. You'll need your old mnemonic to recover the previous identity.
+</ParamField>
+
+#### What happens
+
+<Steps>
+  <Step title="Generate mnemonic">
+    Creates a cryptographically secure 24-word BIP39 mnemonic phrase
+  </Step>
+  <Step title="Derive keys">
+    Derives Ed25519 signing keys and X25519 key exchange keys from the mnemonic
+  </Step>
+  <Step title="Store in keychain">
+    Saves the mnemonic to your OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
+  </Step>
+  <Step title="Display mnemonic">
+    Shows your 24-word phrase **one time only** - write it down immediately
+  </Step>
+</Steps>
+
+#### Example output
+
+```bash
+$ gssh user identity init
+Generating identity from new mnemonic...
+
+=== YOUR 24-WORD RECOVERY PHRASE ===
+
+   1. abandon       7. degree       13. language     19. spider
+   2. ability       8. deliver      14. latin        20. spike
+   3. able           9. denial       15. laugh        21. spin
+   4. about         10. depend       16. laundry      22. split
+   5. above         11. derive       17. lava         23. sponsor
+   6. absent        12. describe     18. law          24. spread
+
+=== WRITE THIS DOWN AND STORE IT SAFELY ===
+
+This phrase is the ONLY way to recover your identity on a new device.
+It will NOT be shown again after this step.
+The mnemonic is stored in your OS keychain on this machine.
+
+Identity created and stored in keychain
+
+Identity Information:
+  ID:          usr_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+  Fingerprint: a1b2:c3d4:e5f6:g7h8
+
+Public Key:
+  gssh-user:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+```
+
+<Note>
+  The identity ID (`usr_...`) is derived from your signing public key and remains constant across all devices where you recover the same mnemonic.
+</Note>
+
+---
+
+### gssh user identity show
+
+Display information about your current identity.
+
+```bash
+gssh user identity show [options]
+```
+
+<ParamField path="--fingerprint" type="boolean">
+  Output only the fingerprint (4 colon-separated hex pairs). Useful for scripts.
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Output identity information in JSON format
+</ParamField>
+
+#### Example output
+
+```bash
+$ gssh user identity show
+Identity Information:
+  ID:          usr_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+  Fingerprint: a1b2:c3d4:e5f6:g7h8
+  Created:     2026-01-15T10:30:00.000Z
+
+Public Key:
+  gssh-user:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+```
+
+#### JSON output
+
+```bash
+$ gssh user identity show --json
+{
+  "id": "usr_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6",
+  "signingPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "keyExchangePublicKey": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+  "publicKey": "gssh-user:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+  "fingerprint": "a1b2:c3d4:e5f6:g7h8",
+  "createdAt": "2026-01-15T10:30:00.000Z"
+}
+```
+
+#### Fingerprint-only output
+
+```bash
+$ gssh user identity show --fingerprint
+a1b2:c3d4:e5f6:g7h8
+```
+
+---
+
+### gssh user identity recover
+
+Recover your identity from a 24-word mnemonic phrase on a new device.
+
+```bash
+gssh user identity recover [options]
+```
+
+<ParamField path="--force" type="boolean">
+  Replace existing identity. Requires confirmation.
+</ParamField>
+
+#### Recovery process
+
+<Steps>
+  <Step title="Enter mnemonic">
+    You'll be prompted to enter your 24-word recovery phrase (space-separated)
+  </Step>
+  <Step title="Derive keys">
+    The same Ed25519 and X25519 keys are derived from your mnemonic
+  </Step>
+  <Step title="Store in keychain">
+    Mnemonic is saved to the OS keychain on this device
+  </Step>
+  <Step title="Verify identity">
+    Your identity ID and fingerprint will match across all devices with the same mnemonic
+  </Step>
+</Steps>
+
+#### Example
+
+```bash
+$ gssh user identity recover
+Enter your 24-word recovery phrase (space-separated):
+Mnemonic: abandon ability able about above absent absorb abstract absurd abuse access accident
+Deriving identity from mnemonic...
+Identity recovered and stored in keychain
+
+Identity Information:
+  ID:          usr_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
+  Fingerprint: a1b2:c3d4:e5f6:g7h8
+
+Public Key:
+  gssh-user:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+```
+
+<Warning>
+  If you recover on a new device, your identity ID will match, but you'll need to re-authorize with relays and machines.
+</Warning>
+
+---
+
+### gssh user identity export
+
+Export your public key in the `gssh-user:` format for sharing.
+
+```bash
+gssh user identity export
+```
+
+Outputs only the public key string (no decoration) for piping to other commands.
+
+#### Example
+
+```bash
+$ gssh user identity export
+gssh-user:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
+
+# Pipe to clipboard (macOS)
+$ gssh user identity export | pbcopy
+
+# Save to file
+$ gssh user identity export > my-public-key.txt
+```
+
+---
+
+### gssh user identity remove
+
+Remove your identity from the OS keychain.
+
+```bash
+gssh user identity remove [options]
+```
+
+<ParamField path="--force" type="boolean">
+  Skip confirmation prompt
+</ParamField>
+
+<Warning>
+  **This is irreversible without your mnemonic.** Make sure you have your 24-word phrase written down before removing your identity.
+</Warning>
+
+#### Example
+
+```bash
+$ gssh user identity remove
+WARNING: Removing your identity is irreversible without your 24-word mnemonic.
+
+Are you sure you want to remove your identity? (y/N) y
+Identity removed from keychain.
+Use `gssh user identity recover` with your mnemonic to restore it.
+```
+
+## Identity Storage
+
+### Keychain location
+
+- **macOS**: Keychain Access (item: `USER_ROOT_IDENTITY`)
+- **Linux**: Secret Service API (via libsecret)
+- **Windows**: Credential Manager
+
+### What's stored
+
+```json
+{
+  "version": 2,
+  "mnemonic": "abandon ability able about above absent absorb abstract absurd abuse access accident...",
+  "createdAt": 1705315800000
+}
+```
+
+Keys are **derived on demand** from the mnemonic, not stored separately.
+
+## Key Derivation
+
+GitSpace uses BIP39 mnemonic → seed derivation:
+
+1. **Mnemonic** (24 words) → **512-bit seed** (PBKDF2-HMAC-SHA512)
+2. **Seed** → **Ed25519 signing keypair** (first 32 bytes)
+3. **Seed** → **X25519 key exchange keypair** (bytes 32-64)
+4. **Signing public key** → **Identity ID** (Base58 with `usr_` prefix)
+5. **Signing public key** → **Fingerprint** (SHA-256, first 8 bytes, colon-separated hex)
+
+## Common Workflows
+
+### First-time setup
+
+```bash
+# Create identity
+gssh user identity init
+
+# Write down your 24-word phrase!
+
+# Verify it was created
+gssh user identity show
+```
+
+### Moving to a new device
+
+```bash
+# On new device, recover from mnemonic
+gssh user identity recover
+
+# Enter your 24-word phrase when prompted
+
+# Verify identity matches
+gssh user identity show --fingerprint
+```
+
+### Sharing your public key
+
+```bash
+# Export for someone to add you to their relay or machine
+gssh user identity export
+
+# They'll use this in commands like:
+# gssh relay access add <your-public-key>
+```
+
+## Troubleshooting
+
+### "No identity found"
+
+Run `gssh user identity init` to create a new identity, or `gssh user identity recover` if you have a mnemonic.
+
+### "Identity already exists"
+
+Use `--force` to overwrite, but make sure you have the old mnemonic written down:
+
+```bash
+gssh user identity init --force
+```
+
+### Keychain access denied
+
+On macOS, you may need to grant terminal access to Keychain:
+
+1. Open **Keychain Access** app
+2. Find the `USER_ROOT_IDENTITY` item
+3. Right-click → Get Info → Access Control
+4. Add your terminal application
+
+## Security Considerations
+
+<Warning>
+  - **Never share your 24-word mnemonic** - it grants full control of your identity
+  - **Never commit it to git** - use the keychain only
+  - **Write it down offline** - don't store it in cloud notes or password managers
+  - **Test recovery** - verify you can recover before relying on the mnemonic
+</Warning>
+
+<Note>
+  Your **public key** (`gssh-user:...`) is safe to share - it only allows others to grant you access or verify your identity. Your **private keys** never leave your device.
+</Note>
+
+## Related Commands
+
+- [gssh user auth](/cli/user/auth) - Authenticate with gitspace.sh
+- [gssh invite](/cli/invite) - Create invite tokens signed with your identity
+- [gssh machine serve](/cli/machine/serve) - Start machine daemon
+- [gssh relay start](/cli/relay/start) - Start relay server

@@ -1,0 +1,151 @@
+---
+title: Installation
+description: Install GitSpace CLI and configure prerequisites
+---
+
+GitSpace is a powerful CLI tool for managing GitHub repository workspaces using git worktrees with secure remote terminal access.
+
+## Prerequisites
+
+Before installing GitSpace, ensure the following tools are installed and available in your PATH:
+
+<CardGroup cols={3}>
+  <Card title="GitHub CLI" icon="github" href="https://cli.github.com/">
+    Required for listing and managing repositories
+  </Card>
+  <Card title="Git" icon="git" href="https://git-scm.com/">
+    Required for worktree management
+  </Card>
+  <Card title="jq" icon="brackets-curly" href="https://stedolan.github.io/jq/">
+    Required for JSON processing
+  </Card>
+</CardGroup>
+
+### GitHub Authentication
+
+You must authenticate the GitHub CLI before using GitSpace:
+
+```bash
+gh auth login
+```
+
+Follow the prompts to authenticate via your browser or with a personal access token.
+
+## Installation
+
+GitSpace can be installed using any popular Node.js package manager:
+
+<CodeGroup>
+```bash npm
+npm install -g gitspace
+```
+
+```bash bun
+bun install -g gitspace
+```
+
+```bash pnpm
+pnpm install -g gitspace
+```
+
+```bash yarn
+yarn global add gitspace
+```
+</CodeGroup>
+
+## Verify Installation
+
+After installation, verify that GitSpace is properly installed:
+
+```bash
+gssh --version
+```
+
+You should see output similar to:
+
+```
+0.2.0-rc.27
+```
+
+## System Requirements
+
+<Info>
+GitSpace requires **Bun 1.3.8 or higher** as the runtime. The installer will handle platform-specific binaries automatically.
+</Info>
+
+### Supported Platforms
+
+GitSpace supports the following platforms:
+
+- **macOS** (Apple Silicon - arm64)
+- **macOS** (Intel - x64)
+- **Linux** (x64)
+- **Linux** (arm64)
+
+## Configuration Directory
+
+GitSpace creates its configuration and workspace directory at:
+
+```
+~/gitspace/
+```
+
+This directory will contain:
+- `.config.json` - Global configuration
+- `<project-name>/` - Individual project directories
+- `.identity/` - Cryptographic identity (for remote access)
+- `.relay/` - Relay server state (if applicable)
+
+<Note>
+The first time you run `gssh`, the configuration directory will be created automatically.
+</Note>
+
+## Troubleshooting
+
+### GitHub CLI not authenticated
+
+If you see this error:
+
+```
+Error: GitHub CLI is not authenticated
+```
+
+**Solution:** Run `gh auth login` and complete the authentication flow.
+
+### Missing dependencies
+
+If GitSpace reports missing dependencies:
+
+```
+Error: Required dependency 'jq' not found
+```
+
+**Solution:** Install the missing tool using your system's package manager:
+
+<CodeGroup>
+```bash macOS
+brew install jq
+```
+
+```bash Ubuntu/Debian
+sudo apt-get install jq
+```
+
+```bash Fedora/RHEL
+sudo dnf install jq
+```
+</CodeGroup>
+
+### Binary not found
+
+If the `gssh` command is not found after installation:
+
+1. Ensure your global npm/bun bin directory is in your PATH
+2. Try reinstalling with your package manager
+3. Check that the installation completed successfully
+
+## Next Steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Get started with GitSpace by creating your first project and workspace
+</Card>

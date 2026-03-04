@@ -1,0 +1,364 @@
+---
+title: "Status Command"
+description: "Check health of all GitSpace daemons"
+---
+
+## Overview
+
+The `gssh status` command provides a unified view of all GitSpace daemon processes:
+
+- **tmux-lite server**: Terminal multiplexer for persistent sessions
+- **serve daemon**: Remote access server with relay connection
+
+## Usage
+
+```bash
+gssh status
+```
+
+No options required. Displays status of all daemons in a formatted box.
+
+---
+
+## Output Format
+
+### Both Daemons Running
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ● tmux-lite    running    3 sessions (2 att)│
+│               uptime: 2h 15m                 │
+│ ● serve        ● connected    1 client       │
+│               uptime: 2h 14m                 │
+│               hosting: myname ●              │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+### tmux-lite Running, serve Stopped
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ● tmux-lite    running    1 session          │
+│               uptime: 5m 32s                 │
+│ ○ serve        not running                   │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+### Both Daemons Stopped
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ○ tmux-lite    not running                   │
+│ ○ serve        not running                   │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+## Status Indicators
+
+### tmux-lite Server
+
+<ResponseField name="●" type="status" color="green">
+  Server is running and responsive
+</ResponseField>
+
+<ResponseField name="○" type="status" color="gray">
+  Server is not running
+</ResponseField>
+
+**Metrics:**
+- **Sessions**: Total active sessions
+- **Attached**: Number of sessions with attached clients (shown in parentheses if > 0)
+- **Uptime**: Time since server started (seconds, minutes, hours, or days)
+
+**Example:**
+```
+● tmux-lite    running    5 sessions (3 attached)
+              uptime: 3h 42m
+```
+
+---
+
+### Serve Daemon
+
+<ResponseField name="●" type="status" color="green">
+  Daemon is running
+</ResponseField>
+
+<ResponseField name="○" type="status" color="gray">
+  Daemon is not running
+</ResponseField>
+
+**Relay Connection Status:**
+
+<ResponseField name="● connected" type="status" color="green">
+  Connected to relay server
+</ResponseField>
+
+<ResponseField name="◐ connecting" type="status" color="yellow">
+  Establishing connection to relay
+</ResponseField>
+
+<ResponseField name="◐ reconnecting" type="status" color="yellow">
+  Reconnecting after disconnect
+</ResponseField>
+
+<ResponseField name="○ disconnected" type="status" color="red">
+  Not connected to relay
+</ResponseField>
+
+**Metrics:**
+- **Clients**: Number of connected remote clients
+- **Uptime**: Time since daemon started
+- **Hosting**: Subdomain name and tunnel status (if using gitspace.sh hosting)
+
+**Example (hosted mode):**
+```
+● serve        ● connected    2 clients
+              uptime: 1d 3h
+              hosting: myworkspace ●
+```
+
+**Example (relay mode):**
+```
+● serve        ● connected    0 clients
+              uptime: 45m
+```
+
+**Hosting tunnel indicator:**
+- `●` (green) = Cloudflare tunnel active
+- `○` (yellow) = Tunnel not active or starting
+
+---
+
+## Uptime Formatting
+
+Uptime is displayed in human-readable format:
+
+| Duration | Format | Example |
+|----------|--------|----------|
+| < 60s | Seconds | `45s` |
+| < 1h | Minutes + seconds | `15m 32s` |
+| < 24h | Hours + minutes | `3h 42m` |
+| ≥ 24h | Days + hours | `2d 5h` |
+
+---
+
+## Exit Codes
+
+| Code | Meaning |
+|------|----------|
+| 0 | Status displayed successfully |
+| 1 | Error querying daemon status |
+
+<Note>
+  The command succeeds even if daemons are stopped. Exit code 1 only occurs on unexpected errors.
+</Note>
+
+---
+
+## Starting Daemons
+
+If a daemon is not running, use these commands to start it:
+
+### Start tmux-lite
+
+```bash
+gssh machine tmux start
+```
+
+<Note>
+  tmux-lite starts automatically when you create or attach to a session, so manual start is usually unnecessary.
+</Note>
+
+### Start serve
+
+```bash
+gssh machine serve start
+```
+
+See [Serve Command](/cli/machine/serve) for options (foreground, relay URL, etc.).
+
+---
+
+## Stopping Daemons
+
+### Stop tmux-lite
+
+```bash
+gssh machine tmux stop [--force]
+```
+
+Requires `--force` if active sessions exist.
+
+### Stop serve
+
+```bash
+gssh machine serve stop
+```
+
+---
+
+## Troubleshooting
+
+### Daemon shows running but is unresponsive
+
+This usually indicates a crashed process with stale PID file.
+
+**Solution:**
+
+```bash
+# Stop both daemons
+gssh machine tmux stop --force
+gssh machine serve stop
+
+# Restart
+gssh machine tmux start
+gssh machine serve start
+```
+
+### Relay status shows "reconnecting" constantly
+
+The relay server may be unreachable.
+
+**Check relay connection:**
+
+```bash
+# View serve daemon logs
+cat ~/gitspace/.serve/serve.log
+
+# Restart with foreground mode to see errors
+gssh machine serve stop
+gssh machine serve start --foreground
+```
+
+### Hosting tunnel not active
+
+Cloudflare tunnel may have failed to start.
+
+**Solution:**
+
+```bash
+# Check hosting status
+gssh user host status
+
+# Restart serve daemon
+gssh machine serve stop
+gssh machine serve start
+```
+
+### Status command hangs
+
+Daemon status socket may be stuck.
+
+**Force kill and restart:**
+
+```bash
+# Find daemon PIDs
+ps aux | grep "[g]ssh machine"
+
+# Kill processes
+kill <pid>
+
+# Clean up sockets
+rm -f ~/gitspace/.serve/*.sock
+rm -f /tmp/tmux-lite.sock
+
+# Restart
+gssh machine serve start
+gssh machine tmux start
+```
+
+---
+
+## Common Scenarios
+
+### Fresh install (nothing running)
+
+```bash
+gssh status
+```
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ○ tmux-lite    not running                   │
+│ ○ serve        not running                   │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+This is normal before creating any sessions or starting remote access.
+
+### Active development (tmux-lite only)
+
+```bash
+gssh status
+```
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ● tmux-lite    running    2 sessions (1 att) │
+│               uptime: 1h 23m                 │
+│ ○ serve        not running                   │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+Typical for local-only usage without remote access.
+
+### Hosting enabled (both daemons)
+
+```bash
+gssh status
+```
+
+```
+┌──────────────────────────────────────────────┐
+│ gssh status                                  │
+│                                              │
+│ ● tmux-lite    running    4 sessions (2 att) │
+│               uptime: 2d 14h                 │
+│ ● serve        ● connected    3 clients      │
+│               uptime: 2d 14h                 │
+│               hosting: myworkspace ●         │
+│                                              │
+│ Version: 1.0.0                               │
+└──────────────────────────────────────────────┘
+```
+
+Typical for remote access via gitspace.sh hosting.
+
+---
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="tmux-lite Commands" icon="terminal" href="/cli/tmux/commands">
+    Manage terminal sessions
+  </Card>
+  <Card title="Serve Daemon" icon="server" href="/cli/machine/serve">
+    Remote access server
+  </Card>
+  <Card title="Hosting" icon="cloud" href="/cli/host/status">
+    gitspace.sh subdomain hosting
+  </Card>
+</CardGroup>

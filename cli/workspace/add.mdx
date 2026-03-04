@@ -1,0 +1,177 @@
+---
+title: "gssh workspace add"
+description: "Create a new workspace in a project"
+---
+
+## Synopsis
+
+```bash
+gssh workspace add [workspace-name] --project <name> [options]
+```
+
+## Description
+
+Creates a new workspace (git worktree) in the specified project. A workspace represents an isolated development environment for a specific feature or branch.
+
+Workspaces can be created from:
+- GitHub branches (interactive selection)
+- Linear issues (if Linear is configured)
+- Manual name entry
+- Argument-provided name
+
+Each workspace has its own git branch and directory at `~/gitspace/<project>/workspaces/<workspace-name>/`.
+
+## Arguments
+
+<ParamField path="workspace-name" type="string" optional>
+  Name of the workspace to create. If not provided, an interactive prompt will ask how you want to create the workspace (from GitHub branch, Linear issue, or manual entry).
+  
+  The name is sanitized for filesystem safety while preserving branch-like formats (e.g., `fix/bug-123` becomes a valid workspace name).
+</ParamField>
+
+## Options
+
+<ParamField path="--project" type="string" required>
+  Project name (required for all workspace commands)
+</ParamField>
+
+<ParamField path="--branch" type="string" optional>
+  Specify a different branch name from the workspace name. By default, the workspace name is used as the branch name.
+</ParamField>
+
+<ParamField path="--from" type="string" optional>
+  Create workspace from a specific branch instead of the project's base branch (usually `main` or `master`).
+</ParamField>
+
+<ParamField path="--no-setup" type="boolean" optional default="false">
+  Skip running setup scripts defined in `.gitspace/scripts/setup/` after creating the workspace.
+</ParamField>
+
+## Examples
+
+### Create workspace with interactive prompt
+
+```bash
+gssh workspace add --project myapp
+```
+
+You'll be prompted to choose:
+- Create from GitHub branch
+- Create from Linear issue (if configured)
+- Create with manual name
+
+### Create workspace with specific name
+
+```bash
+gssh workspace add feature-auth --project myapp
+```
+
+Creates workspace named `feature-auth` with branch `feature-auth`.
+
+### Create workspace with branch-style name
+
+```bash
+gssh workspace add fix/login-bug --project myapp
+```
+
+Creates a workspace with sanitized name while preserving the branch format.
+
+### Create workspace with different branch name
+
+```bash
+gssh workspace add my-feature --project myapp --branch feature/my-feature
+```
+
+Creates workspace `my-feature` but uses `feature/my-feature` as the git branch name.
+
+### Create workspace from specific branch
+
+```bash
+gssh workspace add hotfix --project myapp --from release-1.0
+```
+
+Creates workspace branching from `release-1.0` instead of the base branch.
+
+### Skip setup scripts
+
+```bash
+gssh workspace add feature-new --project myapp --no-setup
+```
+
+Creates the workspace but skips any setup scripts defined in `.gitspace/scripts/setup/`.
+
+## Interactive Flows
+
+### GitHub Branch Selection
+
+When selecting "Create from GitHub branch":
+1. Fetches all remote branches
+2. Filters out the base branch
+3. Presents an interactive list for selection
+4. Creates workspace from the selected branch
+
+### Linear Issue Selection
+
+When selecting "Create from Linear issue" (requires Linear configuration):
+1. Fetches unstarted issues from configured Linear team
+2. Displays issues as `ISSUE-123 - Issue Title`
+3. Generates workspace name from issue identifier and title
+4. Saves issue details to `.prompt/issue.md` in the workspace
+
+### Manual Name Entry
+
+When selecting "Create with manual name":
+1. Prompts for workspace name
+2. Validates the name (must contain at least one letter/number)
+3. Validates as a valid git branch name
+4. Creates the workspace with the provided name
+
+## Workspace Creation Process
+
+1. **Validation**: Checks if workspace name already exists
+2. **Remote Check**: Checks if branch exists remotely
+3. **Worktree Creation**: Creates git worktree at `~/gitspace/<project>/workspaces/<workspace-name>/`
+4. **Bundle Sync**: Registers workspace bundle requirements in project metadata
+5. **Linear Integration**: Saves issue details if created from Linear issue
+6. **Setup Scripts**: Runs `.gitspace/scripts/setup/*` unless `--no-setup` is specified
+
+## Bundle Integration
+
+If the project has a bundle defined (`.gitspace/bundle.json`), the workspace creation process:
+- Detects bundle requirements
+- Parses bundle configuration
+- Registers workspace-specific bundle state
+- May run onboarding steps if configured
+
+## Linear Integration
+
+When creating from a Linear issue:
+- Issue details are saved to `.prompt/issue.md`
+- Markdown includes title, description, labels, and metadata
+- Workspace name is auto-generated: `{issue-id}-{sanitized-title}`
+- Example: Issue `ENG-123 "Fix login"` → workspace `eng-123-fix-login`
+
+## Error Handling
+
+<Note>
+  **Common Errors:**
+  
+  - **WorkspaceExistsError**: Workspace with this name already exists
+  - **Invalid branch name**: Contains disallowed characters (spaces, `..`, `:`, `?`, `*`, `[`, `\`, `~`)
+  - **No project specified**: Must provide `--project` flag
+  - **Project not found**: Specified project doesn't exist
+  - **No remote branches**: No branches available (when using GitHub selection)
+</Note>
+
+## Related Commands
+
+- [`gssh workspace list`](/cli/workspace/list) - List all workspaces in a project
+- [`gssh workspace remove`](/cli/workspace/remove) - Remove a workspace
+- [`gssh workspace context`](/cli/workspace/context) - Show workspace context
+- [`gssh project add`](/cli/project/add) - Create a new project
+
+## See Also
+
+- [Linear Integration](/cli/config/linear) - Configure Linear for workspace creation
+- [Bundles](/concepts/bundles) - Project template bundles
+- [Custom Scripts](/concepts/scripts) - Setup and lifecycle scripts

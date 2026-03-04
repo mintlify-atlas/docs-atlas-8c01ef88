@@ -1,0 +1,774 @@
+---
+title: 'Scripts'
+description: 'Convention-based custom scripts for workspace automation'
+---
+
+## Overview
+
+GitSpace uses **convention over configuration** for custom scripts. Scripts are executable files that live in `.gitspace/scripts/` and run automatically at specific lifecycle phases:
+
+- **setup/** - Run when workspace setup state changes (dependencies, build)
+- **select/** - Run on each terminal attach (git fetch, status)
+- **remove/** - Run before workspace deletion (cleanup, notifications)
+
+Scripts are **version-controlled** in your repository, so different branches can have different automation.
+
+## Script Phases
+
+### Setup Phase (`setup/`)
+
+**When:** Runs when setup state requires refresh
+
+**Triggers:**
+- Workspace is first created
+- Bundle configuration changes
+- Bundle values change
+- `gitspace.lock` file is missing
+
+**Use cases:**
+- Install dependencies (`npm install`, `pip install`)
+- Build project (`npm run build`)
+- Copy environment files (`.env.local`)
+- Run database migrations
+- Initialize local services
+
+**Location:**
+```
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/setup/
+├── 01-install-deps.sh
+├── 02-build.sh
+└── 03-copy-env.sh
+```
+
+### Select Phase (`select/`)
+
+**When:** Runs on each new terminal attach
+
+**Triggers:**
+- Opening workspace in TUI
+- Running `gssh workspace context`
+- Starting a new terminal session
+
+**Use cases:**
+- Fetch latest changes (`git fetch`)
+- Show git status
+- Display workspace info
+- Check for stale dependencies
+- Run quick health checks
+
+**Location:**
+```
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/select/
+├── 01-git-fetch.sh
+└── 02-show-status.sh
+```
+
+<Info>
+Select scripts should be **fast** (< 2 seconds) since they run on every attach.
+</Info>
+
+### Remove Phase (`remove/`)
+
+**When:** Runs before workspace deletion
+
+**Triggers:**
+- Running `gssh workspace remove`
+- Deleting workspace from TUI
+
+**Use cases:**
+- Stop local services
+- Clean up Docker containers
+- Remove temporary files
+- Send notifications
+- Archive workspace data
+
+**Location:**
+```
+~/gitspace/my-app/workspaces/feature-auth/.gitspace/scripts/remove/
+└── 01-cleanup-cache.sh
+```
+
+### Pre Phase (`pre/`) [Deprecated]
+
+<Warning>
+**Deprecated:** The `pre/` phase has been deprecated. Migrate scripts to `setup/` for better control.
+
+- Old: `.gitspace/scripts/pre/01-install.sh`
+- New: `.gitspace/scripts/setup/01-install.sh`
+
+The `setup/` phase provides ordered execution with better state tracking.
+</Warning>
+
+## Script Execution
+
+### Discovery & Ordering
+
+GitSpace discovers scripts by:
+
+1. **Scanning** `.gitspace/scripts/<phase>/` directory
+2. **Filtering** to executable files only (`chmod +x`)
+3. **Sorting** alphabetically for predictable order
+
+```typescript
+// src/utils/run-scripts.ts:62-92
+export function discoverScripts(scriptsDir: string): string[] {
+  const files = readdirSync(scriptsDir)
+  const scripts: string[] = []
+  
+  for (const file of files) {
+    const filePath = join(scriptsDir, file)
+    const stats = statSync(filePath)
+    
+    // Check if file has execute permission
+    if (stats.isFile() && (stats.mode & 0o111) !== 0) {
+      scripts.push(filePath)
+    }
+  }
+  
+  scripts.sort() // Alphabetical order
+  return scripts
+}
+```
+
+**Naming convention:** Use numbered prefixes to control order:
+
+```
+setup/
+├── 01-install-deps.sh    # Runs first
+├── 02-build.sh           # Runs second
+└── 03-copy-env.sh        # Runs third
+```
+
+### Execution Environment
+
+**Working directory:** The workspace path
+```bash
+PWD=/Users/me/gitspace/my-app/workspaces/feature-auth
+```
+
+**Arguments:** Two positional arguments
+```bash
+$1 = workspace name (e.g., "feature-auth")
+$2 = repository (e.g., "myorg/my-app")
+```
+
+**Environment variables:** Bundle values + process environment
+```bash
+# Bundle config values (from onboarding)
+teamName=engineering
+TEAM_NAME=engineering
+awsRegion=us-west-2
+AWS_REGION=us-west-2
+
+# Bundle secrets (from OS keychain)
+apiKey=sk_live_abc123
+API_KEY=sk_live_abc123
+
+# Standard environment
+HOME=/Users/me
+PATH=/usr/local/bin:/usr/bin:/bin
+# ... all other process.env variables
+```
+
+### Example Script
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/01-install-deps.sh
+
+set -e  # Exit on error
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+echo "Setting up $WORKSPACE_NAME for $REPOSITORY"
+echo "Team: $teamName (or $TEAM_NAME)"
+echo "Region: $awsRegion (or $AWS_REGION)"
+
+# Install dependencies
+if [ -f package.json ]; then
+  echo "Installing npm dependencies..."
+  npm install
+fi
+
+if [ -f requirements.txt ]; then
+  echo "Installing Python dependencies..."
+  pip install -r requirements.txt
+fi
+
+# Use secret values
+if [ -n "$apiKey" ]; then
+  echo "Configuring API key..."
+  echo "API_KEY=$apiKey" > .env.local
+fi
+
+echo "Dependencies installed!"
+```
+
+<Note>
+Make scripts executable: `chmod +x .gitspace/scripts/setup/01-install-deps.sh`
+</Note>
+
+## Bundle Values in Scripts
+
+### Value Export Format
+
+Bundle values are exported in **two forms**:
+
+1. **Exact key:** Using the exact `configKey` from `bundle.json`
+2. **Normalized alias:** Uppercase snake-case version
+
+```json
+// bundle.json
+{
+  "onboarding": [
+    {
+      "id": "api-key",
+      "type": "secret",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team",
+      "type": "input",
+      "configKey": "teamName"
+    }
+  ]
+}
+```
+
+```bash
+# Script receives both forms:
+apiKey=sk_live_abc123
+API_KEY=sk_live_abc123
+teamName=engineering
+TEAM_NAME=engineering
+```
+
+### Normalization Rules
+
+```typescript
+// src/utils/normalize-env-key.ts
+export function normalizeEnvKey(key: string): string | null {
+  // Remove non-alphanumeric characters, convert to uppercase, join with underscores
+  // Examples:
+  // apiKey -> API_KEY
+  // team_name -> TEAM_NAME
+  // aws-region -> AWS_REGION
+}
+```
+
+**Validation:** Normalized names must be shell-safe (`[A-Za-z_][A-Za-z0-9_]*`)
+
+<Warning>
+**Collision Detection:**
+
+GitSpace validates that config keys don't collide when normalized:
+
+```json
+// ERROR: Both normalize to API_KEY
+{
+  "onboarding": [
+    { "configKey": "apiKey" },   // -> API_KEY
+    { "configKey": "api_key" }  // -> API_KEY (collision!)
+  ]
+}
+```
+
+Implemented in `src/utils/run-scripts.ts:187-204`.
+</Warning>
+
+### Secret Access
+
+Secrets are retrieved from OS keychain and exported:
+
+```typescript
+// src/utils/secrets.ts
+export async function getProjectSecrets(
+  projectName: string,
+  secretKeys: string[]
+): Promise<Record<string, string>> {
+  const secrets: Record<string, string> = {}
+  
+  for (const key of secretKeys) {
+    const value = await getSecret(`gitspace:${projectName}:${key}`)
+    if (value) {
+      secrets[key] = value
+    }
+  }
+  
+  return secrets
+}
+```
+
+**Keychain format:** `gitspace:<project-name>:<configKey>`
+
+Example: `gitspace:my-app:apiKey`
+
+## Script Execution Modes
+
+### Interactive Mode (Default)
+
+**Used by:** CLI commands, TUI (when appropriate)
+
+**Behavior:**
+- Scripts can prompt for user input
+- stdout/stderr inherited (displayed in terminal)
+- stdin is available for interactive prompts
+
+```bash
+# Example interactive script
+read -p "Continue? (y/n) " answer
+if [ "$answer" != "y" ]; then
+  exit 1
+fi
+```
+
+### Non-Interactive Mode
+
+**Used by:** Daemons, remote sessions, background operations
+
+**Behavior:**
+- stdin is closed (scripts cannot prompt)
+- stdout/stderr captured and logged
+- Prevents scripts from blocking indefinitely
+- Output streamed to callbacks (for TUI/Web display)
+
+```typescript
+// src/utils/run-scripts.ts:108-115
+export interface RunScriptsOptions {
+  nonInteractive?: boolean  // Close stdin, capture output
+  onOutput?: (data: Buffer) => void  // Stream output callback
+  signal?: AbortSignal  // Cancellation support
+}
+```
+
+<Info>
+Non-interactive mode is essential for remote access where the script runner has no TTY.
+</Info>
+
+## Error Handling
+
+### Exit Codes
+
+Scripts should follow standard exit code conventions:
+
+- `0` - Success
+- `1` - User error (configuration, missing file)
+- `2` - System error (command not found, permission denied)
+- Other non-zero - Failure
+
+### Failure Behavior
+
+**Setup/Remove scripts:**
+- Failure stops execution
+- Error message includes last 25 lines of output
+- Workspace setup marked incomplete
+
+**Select scripts:**
+- Failure stops execution
+- Error logged but doesn't block terminal attach
+
+```typescript
+// src/utils/run-scripts.ts:42-56
+function formatScriptFailureMessage(
+  scriptName: string,
+  code: number | null,
+  output: string
+): string {
+  const header = `Script failed with exit code ${code}: ${scriptName}`
+  
+  const { tail, truncated } = truncateScriptOutputTail(output)
+  const intro = truncated ? 'Last output (truncated):' : 'Last output:'
+  
+  return `${header}\n\n${intro}\n${tail}`
+}
+```
+
+### Example Error Handling
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/02-build.sh
+
+set -e  # Exit immediately on error
+
+WORKSPACE=$1
+REPO=$2
+
+# Check prerequisites
+if ! command -v npm &>/dev/null; then
+  echo "Error: npm is not installed" >&2
+  exit 1
+fi
+
+if [ ! -f package.json ]; then
+  echo "Warning: No package.json found, skipping build" >&2
+  exit 0
+fi
+
+# Run build with error handling
+if ! npm run build; then
+  echo "Error: Build failed for $WORKSPACE" >&2
+  echo "Check the output above for details" >&2
+  exit 2
+fi
+
+echo "Build completed successfully!"
+```
+
+## Cancellation Support
+
+Scripts can be cancelled via `AbortSignal`:
+
+```typescript
+// src/utils/run-scripts.ts:261-296
+const signal = new AbortController().signal
+
+await runScriptsInTerminal(
+  scriptsDir,
+  workspacePath,
+  workspaceName,
+  repository,
+  { signal }
+)
+
+// Cancel execution
+abortController.abort()
+```
+
+**Behavior:**
+- Sends `SIGTERM` to script process
+- After 1.5s timeout, sends `SIGKILL`
+- Throws `ScriptExecutionCancelledError`
+
+## Script Examples
+
+### Setup: Install Dependencies
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/01-install-deps.sh
+
+set -e
+
+WORKSPACE=$1
+REPO=$2
+
+echo "Installing dependencies for $WORKSPACE..."
+
+if [ -f package-lock.json ]; then
+  npm ci  # Use ci for faster, deterministic installs
+elif [ -f package.json ]; then
+  npm install
+fi
+
+if [ -f Gemfile ]; then
+  bundle install
+fi
+
+if [ -f go.mod ]; then
+  go mod download
+fi
+
+echo "Dependencies installed!"
+```
+
+### Setup: Database Setup
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/03-database.sh
+
+set -e
+
+WORKSPACE=$1
+
+# Start PostgreSQL in Docker
+echo "Starting PostgreSQL..."
+docker run -d \
+  --name ${WORKSPACE}-postgres \
+  -e POSTGRES_PASSWORD=$dbPassword \
+  -p 5432:5432 \
+  postgres:15
+
+# Wait for database to be ready
+echo "Waiting for database..."
+sleep 5
+
+# Run migrations
+echo "Running migrations..."
+DATABASE_URL="postgresql://postgres:$dbPassword@localhost:5432/myapp" \
+  npm run migrate
+
+echo "Database ready!"
+```
+
+### Select: Git Status
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/select/01-status.sh
+
+WORKSPACE=$1
+
+# Fetch latest changes (quiet mode)
+git fetch --quiet origin 2>/dev/null || true
+
+# Show branch and status
+echo "Workspace: $WORKSPACE"
+git status -sb
+
+# Check for stale dependencies
+if [ -f package.json ] && [ package.json -nt node_modules/.package-lock.json ]; then
+  echo "⚠️  Warning: package.json changed, run 'npm install'"
+fi
+```
+
+### Remove: Cleanup
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/remove/01-cleanup.sh
+
+set -e
+
+WORKSPACE=$1
+
+echo "Cleaning up $WORKSPACE..."
+
+# Stop Docker containers
+if command -v docker &>/dev/null; then
+  docker stop ${WORKSPACE}-postgres 2>/dev/null || true
+  docker rm ${WORKSPACE}-postgres 2>/dev/null || true
+fi
+
+# Remove build artifacts
+rm -rf dist/ build/ .next/ node_modules/.cache/
+
+# Remove temporary files
+rm -f .env.local .env.test
+
+echo "Cleanup complete!"
+```
+
+### Advanced: Notify Slack
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/remove/02-notify-slack.sh
+
+WORKSPACE=$1
+REPO=$2
+
+# Skip if no Slack webhook configured
+if [ -z "$slackWebhook" ]; then
+  exit 0
+fi
+
+# Get branch and commit info
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+COMMIT=$(git log -1 --pretty=format:"%h - %s")
+
+# Send notification
+curl -X POST "$slackWebhook" \
+  -H 'Content-Type: application/json' \
+  -d @- <<EOF
+{
+  "text": "Workspace deleted: $WORKSPACE",
+  "attachments": [
+    {
+      "color": "warning",
+      "fields": [
+        {"title": "Repository", "value": "$REPO", "short": true},
+        {"title": "Branch", "value": "$BRANCH", "short": true},
+        {"title": "Last Commit", "value": "$COMMIT", "short": false}
+      ]
+    }
+  ]
+}
+EOF
+
+echo "Slack notification sent"
+```
+
+## Best Practices
+
+### Executable Permissions
+
+```bash
+# Make scripts executable
+chmod +x .gitspace/scripts/setup/*.sh
+chmod +x .gitspace/scripts/select/*.sh
+chmod +x .gitspace/scripts/remove/*.sh
+
+# Verify permissions
+ls -la .gitspace/scripts/setup/
+# -rwxr-xr-x  1 user  staff  01-install-deps.sh
+```
+
+<Warning>
+Scripts **must** have execute permission (`+x`). GitSpace only runs executable files.
+</Warning>
+
+### Set Exit on Error
+
+```bash
+#!/bin/bash
+set -e  # Exit immediately if any command fails
+set -u  # Exit if undefined variable is used
+set -o pipefail  # Exit if any command in pipeline fails
+```
+
+### Idempotent Scripts
+
+Setup scripts should be idempotent (safe to run multiple times):
+
+```bash
+#!/bin/bash
+set -e
+
+# Check if already setup
+if [ -f .setup-complete ]; then
+  echo "Setup already completed, skipping..."
+  exit 0
+fi
+
+# Run setup
+npm install
+npm run build
+
+# Mark as complete
+touch .setup-complete
+```
+
+### Fast Select Scripts
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/select/01-quick-status.sh
+
+# Use --quiet to suppress output
+git fetch --quiet origin 2>/dev/null &
+
+# Show brief status only
+git status -sb
+
+# Don't wait for fetch to complete
+wait 2>/dev/null || true
+```
+
+Select scripts should complete in < 2 seconds since they run on every attach.
+
+### Logging
+
+```bash
+#!/bin/bash
+
+# Use echo for info messages
+echo "Installing dependencies..."
+
+# Use >&2 for errors
+echo "Error: npm not found" >&2
+
+# Use exit codes
+if ! command -v npm &>/dev/null; then
+  exit 1  # User error
+fi
+```
+
+### Testing Scripts Locally
+
+```bash
+# Test in workspace directory
+cd ~/gitspace/my-app/workspaces/test-workspace
+
+# Run script manually
+.gitspace/scripts/setup/01-install-deps.sh test-workspace myorg/my-app
+
+# Check exit code
+echo $?
+```
+
+## Debugging
+
+### Enable Verbose Output
+
+```bash
+#!/bin/bash
+set -x  # Print each command before executing
+
+WORKSPACE=$1
+REPO=$2
+
+echo "Setting up $WORKSPACE"
+npm install
+```
+
+### Check Script Discovery
+
+```bash
+# List discovered scripts
+ls -la ~/gitspace/my-app/workspaces/test/.gitspace/scripts/setup/
+
+# Verify executable bit
+stat -f "%Sp" script.sh  # macOS
+stat -c "%A" script.sh   # Linux
+```
+
+### View Script Output
+
+```bash
+# In non-interactive mode, output is captured
+# Check debug logs for full output
+gssh workspace add test --project my-app 2>&1 | tee output.log
+```
+
+## Script Execution Flow
+
+```typescript
+// Simplified from src/utils/run-scripts.ts:254-409
+export async function runScriptsInTerminal(
+  scriptsDir: string,
+  workspacePath: string,
+  workspaceName: string,
+  repository: string,
+  options?: RunScriptsOptions
+): Promise<void> {
+  // 1. Discover scripts
+  const scripts = discoverScripts(scriptsDir)
+  
+  // 2. Build environment with bundle values
+  const scriptEnv = {
+    ...process.env,
+    ...bundleValues,     // Exact keys
+    ...normalizedValues, // Normalized aliases
+    ...secretValues      // From OS keychain
+  }
+  
+  // 3. Run each script sequentially
+  for (const scriptPath of scripts) {
+    const child = spawn(
+      scriptPath,
+      [workspaceName, repository],
+      { cwd: workspacePath, env: scriptEnv }
+    )
+    
+    // 4. Wait for completion
+    await waitForExit(child)
+  }
+}
+```
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Bundles" icon="box" href="/concepts/bundles">
+    Repo config bundles that define bundle values for scripts
+  </Card>
+  <Card title="Workspaces" icon="folder-tree" href="/concepts/workspaces">
+    Workspace lifecycle and when scripts execute
+  </Card>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Project structure and configuration
+  </Card>
+</CardGroup>

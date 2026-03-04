@@ -1,0 +1,826 @@
+---
+title: 'Setting Up Team Onboarding'
+description: 'Streamline new developer setup with automated onboarding bundles'
+icon: 'users'
+---
+
+# Setting Up Team Onboarding
+
+Streamline your team's developer experience by creating a comprehensive onboarding bundle. This guide walks through setting up an end-to-end onboarding flow for new team members.
+
+## Overview
+
+A well-designed onboarding bundle:
+
+✅ **Reduces setup time** from hours to minutes
+✅ **Ensures consistency** across team environments
+✅ **Documents requirements** in executable form
+✅ **Automates repetitive tasks** (installs, builds, config)
+✅ **Secures secrets** in OS keychain, not dotfiles
+
+## Example: Full-Stack Web App
+
+Let's create a complete onboarding bundle for a typical full-stack application.
+
+### Project Requirements
+
+- **Frontend**: React + TypeScript
+- **Backend**: Node.js Express API
+- **Database**: PostgreSQL
+- **Deployment**: AWS
+- **Tools**: Docker, pnpm
+- **Secrets**: Database URL, API keys, AWS credentials
+
+### Step 1: Create Bundle Directory
+
+```bash
+cd /path/to/your/repo
+mkdir -p .gitspace/scripts/{setup,select,remove}
+```
+
+### Step 2: Write Bundle Manifest
+
+```json .gitspace/bundle.json
+{
+  "version": "1.0",
+  "name": "webapp-onboarding",
+  "description": "Complete development environment setup for WebApp",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to WebApp!",
+      "description": "This setup wizard will configure your development environment.\n\nYou'll need:\n• Node.js 18+\n• Docker Desktop\n• pnpm package manager\n• AWS CLI\n\nSetup takes ~5 minutes."
+    },
+    {
+      "id": "node-check",
+      "type": "confirm",
+      "title": "Node.js 18+",
+      "description": "We require Node.js version 18 or higher",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org/en/download/"
+    },
+    {
+      "id": "pnpm-check",
+      "type": "confirm",
+      "title": "pnpm Package Manager",
+      "description": "We use pnpm for faster installs and better disk usage",
+      "checkCommand": "pnpm",
+      "installUrl": "https://pnpm.io/installation"
+    },
+    {
+      "id": "docker-check",
+      "type": "confirm",
+      "title": "Docker Desktop",
+      "description": "Required for running PostgreSQL locally",
+      "checkCommand": "docker",
+      "installUrl": "https://www.docker.com/products/docker-desktop"
+    },
+    {
+      "id": "aws-check",
+      "type": "confirm",
+      "title": "AWS CLI",
+      "description": "Optional: needed for deployment tasks",
+      "checkCommand": "aws",
+      "installUrl": "https://aws.amazon.com/cli/"
+    },
+    {
+      "id": "team-name",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Which team are you on? (engineering, design, product)",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    },
+    {
+      "id": "environment",
+      "type": "input",
+      "title": "Environment",
+      "description": "Target environment (development, staging)",
+      "configKey": "environment",
+      "defaultValue": "development"
+    },
+    {
+      "id": "database-url",
+      "type": "secret",
+      "title": "Database Connection String",
+      "description": "PostgreSQL connection URL\n\nFormat: postgresql://user:password@host:port/database\nExample: postgresql://dev:dev@localhost:5432/webapp_dev\n\nGet yours from: https://wiki.company.com/dev-database",
+      "configKey": "databaseUrl"
+    },
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "External API Key",
+      "description": "API key for third-party service\n\nCreate at: https://app.external-service.com/settings/api\nUse development key for local work",
+      "configKey": "externalApiKey"
+    },
+    {
+      "id": "aws-profile",
+      "type": "input",
+      "title": "AWS Profile Name",
+      "description": "AWS CLI profile to use (from ~/.aws/config)",
+      "configKey": "awsProfile",
+      "defaultValue": "default"
+    },
+    {
+      "id": "aws-region",
+      "type": "input",
+      "title": "AWS Region",
+      "description": "Primary AWS region for resources",
+      "configKey": "awsRegion",
+      "defaultValue": "us-east-1"
+    },
+    {
+      "id": "complete",
+      "type": "info",
+      "title": "Setup Complete!",
+      "description": "Your environment is configured.\n\nNext steps:\n1. Dependencies will be installed\n2. Database will be initialized\n3. Development servers will start\n\nThis may take a few minutes."
+    }
+  ]
+}
+```
+
+### Step 3: Write Setup Scripts
+
+<Tabs>
+  <Tab title="01-environment.sh">
+    Create environment file from bundle values:
+    
+    ```bash .gitspace/scripts/setup/01-environment.sh
+    #!/bin/bash
+    set -e
+    
+    WORKSPACE_NAME=$1
+    
+    echo "⚙️  Configuring environment for $WORKSPACE_NAME..."
+    
+    # Create .env file from bundle values
+    cat > .env <<EOF
+    # Auto-generated by GitSpace setup
+    # DO NOT COMMIT THIS FILE
+    
+    NODE_ENV=$environment
+    
+    # Database
+    DATABASE_URL=$databaseUrl
+    
+    # External Services
+    EXTERNAL_API_KEY=$externalApiKey
+    
+    # AWS
+    AWS_PROFILE=$awsProfile
+    AWS_REGION=$awsRegion
+    
+    # Team
+    TEAM=$teamName
+    EOF
+    
+    # Ensure .env is gitignored
+    if ! grep -q "^\.env$" .gitignore 2>/dev/null; then
+      echo ".env" >> .gitignore
+      echo "✅ Added .env to .gitignore"
+    fi
+    
+    echo "✅ Environment configured"
+    echo ""
+    ```
+  </Tab>
+  
+  <Tab title="02-dependencies.sh">
+    Install project dependencies:
+    
+    ```bash .gitspace/scripts/setup/02-dependencies.sh
+    #!/bin/bash
+    set -e
+    
+    echo "📦 Installing dependencies..."
+    echo ""
+    
+    # Install root dependencies
+    echo "→ Root dependencies"
+    pnpm install --frozen-lockfile
+    
+    # Install frontend dependencies
+    if [ -d "frontend" ]; then
+      echo "→ Frontend dependencies"
+      cd frontend
+      pnpm install --frozen-lockfile
+      cd ..
+    fi
+    
+    # Install backend dependencies
+    if [ -d "backend" ]; then
+      echo "→ Backend dependencies"
+      cd backend
+      pnpm install --frozen-lockfile
+      cd ..
+    fi
+    
+    echo ""
+    echo "✅ Dependencies installed"
+    echo ""
+    ```
+  </Tab>
+  
+  <Tab title="03-database.sh">
+    Start local database:
+    
+    ```bash .gitspace/scripts/setup/03-database.sh
+    #!/bin/bash
+    set -e
+    
+    echo "🐘 Starting PostgreSQL database..."
+    echo ""
+    
+    # Check if already running
+    if docker ps | grep -q "webapp-postgres"; then
+      echo "✅ Database already running"
+      exit 0
+    fi
+    
+    # Start PostgreSQL container
+    docker run -d \
+      --name webapp-postgres \
+      -e POSTGRES_USER=dev \
+      -e POSTGRES_PASSWORD=dev \
+      -e POSTGRES_DB=webapp_dev \
+      -p 5432:5432 \
+      postgres:15-alpine
+    
+    echo "⏳ Waiting for database to be ready..."
+    sleep 3
+    
+    # Run migrations
+    if [ -f "backend/package.json" ]; then
+      cd backend
+      pnpm run db:migrate
+      cd ..
+      echo "✅ Database migrations applied"
+    fi
+    
+    echo "✅ Database ready"
+    echo ""
+    ```
+  </Tab>
+  
+  <Tab title="04-build.sh">
+    Initial project build:
+    
+    ```bash .gitspace/scripts/setup/04-build.sh
+    #!/bin/bash
+    set -e
+    
+    echo "🔨 Building project..."
+    echo ""
+    
+    # Build frontend
+    if [ -d "frontend" ]; then
+      echo "→ Building frontend"
+      cd frontend
+      pnpm run build
+      cd ..
+    fi
+    
+    # Build backend
+    if [ -d "backend" ]; then
+      echo "→ Building backend"
+      cd backend
+      pnpm run build
+      cd ..
+    fi
+    
+    echo ""
+    echo "✅ Build complete"
+    echo ""
+    echo "🚀 Ready to develop!"
+    echo ""
+    echo "Useful commands:"
+    echo "  pnpm run dev        - Start dev servers"
+    echo "  pnpm run test       - Run tests"
+    echo "  pnpm run lint       - Lint code"
+    echo ""
+    ```
+  </Tab>
+</Tabs>
+
+### Step 4: Write Select Scripts
+
+<Tabs>
+  <Tab title="01-fetch.sh">
+    Fetch latest changes on attach:
+    
+    ```bash .gitspace/scripts/select/01-fetch.sh
+    #!/bin/bash
+    set -e
+    
+    echo "🔄 Fetching latest changes..."
+    git fetch --all --prune --quiet
+    
+    # Check if branch is behind
+    BRANCH=$(git branch --show-current)
+    UPSTREAM="origin/$BRANCH"
+    
+    if git show-ref --verify --quiet "refs/remotes/$UPSTREAM"; then
+      BEHIND=$(git rev-list --count HEAD.."$UPSTREAM" 2>/dev/null || echo "0")
+      AHEAD=$(git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo "0")
+      
+      if [ "$BEHIND" -gt 0 ]; then
+        echo "⚠️  Your branch is $BEHIND commit(s) behind $UPSTREAM"
+        echo "   Run: git pull"
+      elif [ "$AHEAD" -gt 0 ]; then
+        echo "📤 Your branch is $AHEAD commit(s) ahead of $UPSTREAM"
+      else
+        echo "✅ Branch is up to date"
+      fi
+    fi
+    
+    echo ""
+    ```
+  </Tab>
+  
+  <Tab title="02-status.sh">
+    Show helpful status info:
+    
+    ```bash .gitspace/scripts/select/02-status.sh
+    #!/bin/bash
+    
+    WORKSPACE_NAME=$1
+    
+    echo "═══════════════════════════════════════════════════"
+    echo "📂 Workspace: $WORKSPACE_NAME"
+    echo "🌿 Branch: $(git branch --show-current)"
+    echo "👤 Team: ${TEAM_NAME:-unknown}"
+    echo "═══════════════════════════════════════════════════"
+    echo ""
+    
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+      echo "⚠️  Uncommitted changes:"
+      git status --short
+      echo ""
+    else
+      echo "✅ Working directory clean"
+      echo ""
+    fi
+    
+    # Check if dev server is running
+    if lsof -i:3000 >/dev/null 2>&1; then
+      echo "🟢 Frontend dev server running on http://localhost:3000"
+    else
+      echo "⚪ Frontend dev server not running"
+      echo "   Start with: pnpm run dev"
+    fi
+    
+    if lsof -i:4000 >/dev/null 2>&1; then
+      echo "🟢 Backend API running on http://localhost:4000"
+    else
+      echo "⚪ Backend API not running"
+      echo "   Start with: cd backend && pnpm run dev"
+    fi
+    
+    echo ""
+    ```
+  </Tab>
+</Tabs>
+
+### Step 5: Write Remove Scripts
+
+```bash .gitspace/scripts/remove/01-cleanup.sh
+#!/bin/bash
+set -e
+
+WORKSPACE_NAME=$1
+
+echo "🧹 Cleaning up $WORKSPACE_NAME..."
+
+# Stop and remove database container
+if docker ps -a | grep -q "webapp-postgres"; then
+  docker stop webapp-postgres >/dev/null 2>&1 || true
+  docker rm webapp-postgres >/dev/null 2>&1 || true
+  echo "✅ Stopped PostgreSQL container"
+fi
+
+# Clean build artifacts
+rm -rf dist build .next frontend/dist backend/dist
+rm -rf node_modules/.cache
+echo "✅ Removed build artifacts"
+
+# Remove .env file
+if [ -f ".env" ]; then
+  rm .env
+  echo "✅ Removed .env file"
+fi
+
+echo "✅ Cleanup complete"
+```
+
+### Step 6: Make Scripts Executable
+
+```bash
+chmod +x .gitspace/scripts/setup/*.sh
+chmod +x .gitspace/scripts/select/*.sh
+chmod +x .gitspace/scripts/remove/*.sh
+```
+
+### Step 7: Commit and Share
+
+```bash
+git add .gitspace/
+git commit -m "Add GitSpace onboarding bundle for team"
+git push origin main
+```
+
+## Team Member Experience
+
+New developers simply:
+
+<Steps>
+  <Step title="Install GitSpace">
+    ```bash
+    npm install -g gitspace
+    gh auth login  # One-time GitHub auth
+    ```
+  </Step>
+
+  <Step title="Add Project">
+    ```bash
+    gssh project add
+    # Select "myorg/webapp" from the list
+    ```
+  </Step>
+
+  <Step title="Complete Onboarding">
+    GitSpace detects the bundle and starts the wizard:
+    
+    - Checks if Node.js, pnpm, Docker are installed
+    - Collects database URL, API keys, AWS config
+    - Stores secrets securely in OS keychain
+  </Step>
+
+  <Step title="Automatic Setup">
+    Scripts run automatically:
+    
+    1. Creates `.env` file
+    2. Installs all dependencies
+    3. Starts PostgreSQL in Docker
+    4. Runs database migrations
+    5. Builds frontend and backend
+    
+    **Total time: ~5 minutes** (mostly npm install)
+  </Step>
+
+  <Step title="Start Coding">
+    Developer is dropped into a ready workspace:
+    
+    ```bash
+    # Already in workspace directory
+    pnpm run dev
+    ```
+  </Step>
+</Steps>
+
+## Advanced Onboarding Patterns
+
+### Linear Integration
+
+If your team uses Linear, enable automatic workspace creation from issues:
+
+<Steps>
+  <Step title="Configure Linear API">
+    ```bash
+    gssh user config linear setup
+    # Enter Linear API key and team
+    ```
+  </Step>
+
+  <Step title="Create Workspace from Issue">
+    When creating a workspace, select "From Linear Issue":
+    
+    - Lists your assigned Linear issues
+    - Creates workspace named after issue (e.g., `ENG-123-fix-login`)
+    - Saves issue details in `.prompt/issue.md`
+  </Step>
+
+  <Step title="Use Issue Context in Scripts">
+    ```bash .gitspace/scripts/setup/03-linear-context.sh
+    #!/bin/bash
+    
+    if [ -f ".prompt/issue.md" ]; then
+      echo ""
+      echo "📋 Linear Issue Context:"
+      head -n 5 .prompt/issue.md
+      echo ""
+    fi
+    ```
+  </Step>
+</Steps>
+
+### Multi-Environment Support
+
+Handle different environments (dev, staging, production):
+
+```json
+{
+  "id": "environment",
+  "type": "input",
+  "title": "Target Environment",
+  "description": "Which environment? (development, staging, production)",
+  "configKey": "targetEnv",
+  "defaultValue": "development"
+}
+```
+
+```bash .gitspace/scripts/setup/02-env-specific.sh
+#!/bin/bash
+set -e
+
+case "$targetEnv" in
+  development)
+    echo "🔧 Setting up development environment"
+    cp .env.development.example .env
+    ;;
+  staging)
+    echo "🧪 Setting up staging environment"
+    cp .env.staging.example .env
+    ;;
+  production)
+    echo "🚀 Setting up production environment"
+    cp .env.production.example .env
+    echo "⚠️  WARNING: You are working with PRODUCTION!"
+    ;;
+esac
+```
+
+### Monorepo Support
+
+For monorepos with multiple packages:
+
+```bash .gitspace/scripts/setup/02-monorepo-install.sh
+#!/bin/bash
+set -e
+
+echo "📦 Installing monorepo dependencies..."
+
+# Root install (workspace links)
+pnpm install --frozen-lockfile
+
+# Build shared packages first
+echo "→ Building shared packages"
+pnpm --filter "./packages/*" run build
+
+# Build apps
+echo "→ Building apps"
+pnpm --filter "./apps/*" run build
+
+echo "✅ Monorepo ready"
+```
+
+### Git Hooks Setup
+
+Install pre-commit hooks automatically:
+
+```bash .gitspace/scripts/setup/05-git-hooks.sh
+#!/bin/bash
+set -e
+
+echo "🪝 Installing git hooks..."
+
+if command -v husky >/dev/null 2>&1; then
+  npx husky install
+  echo "✅ Husky hooks installed"
+fi
+
+if [ -f "package.json" ] && grep -q "prepare" package.json; then
+  pnpm run prepare
+  echo "✅ Git hooks prepared"
+fi
+```
+
+## Best Practices for Team Onboarding
+
+### 1. Document Everything
+
+Include a comprehensive README:
+
+```markdown .gitspace/README.md
+# Development Environment
+
+This bundle sets up the complete WebApp development environment.
+
+## What Gets Configured
+
+- ✅ Node.js dependencies (frontend + backend)
+- ✅ PostgreSQL database (Docker)
+- ✅ Environment variables (.env)
+- ✅ Git hooks (Husky)
+- ✅ AWS CLI profile
+
+## Manual Setup (without GitSpace)
+
+If you're not using GitSpace:
+
+1. Install dependencies: `pnpm install`
+2. Copy environment: `cp .env.example .env`
+3. Start database: `docker-compose up -d`
+4. Run migrations: `pnpm run db:migrate`
+5. Build: `pnpm run build`
+
+## Troubleshooting
+
+**Database connection fails:**
+- Check Docker is running: `docker ps`
+- Verify DATABASE_URL in .env
+
+**Build fails:**
+- Clear cache: `rm -rf node_modules/.cache`
+- Reinstall: `pnpm install`
+
+## Getting Help
+
+Slack: #engineering-help
+Wiki: https://wiki.company.com/dev-setup
+```
+
+### 2. Provide Clear Error Messages
+
+```bash
+#!/bin/bash
+set -e
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "❌ ERROR: Docker is not installed"
+  echo ""
+  echo "Docker is required for local development."
+  echo "Download from: https://www.docker.com/products/docker-desktop"
+  echo ""
+  echo "After installing, restart your terminal and try again."
+  exit 1
+fi
+```
+
+### 3. Make Scripts Idempotent
+
+```bash
+#!/bin/bash
+set -e
+
+# Safe to run multiple times
+if [ -f ".setup-complete" ]; then
+  echo "✅ Setup already complete, skipping"
+  exit 0
+fi
+
+# Do work...
+
+touch .setup-complete
+```
+
+### 4. Use Confirmation Steps Wisely
+
+<Tabs>
+  <Tab title="Do">
+    ✅ Check for required tools:
+    
+    ```json
+    {
+      "type": "confirm",
+      "title": "Docker Desktop",
+      "checkCommand": "docker"
+    }
+    ```
+  </Tab>
+  <Tab title="Don't">
+    ❌ Don't check for optional tools:
+    
+    ```json
+    // BAD: Blocks setup if missing
+    {
+      "type": "confirm",
+      "title": "Optional Tool",
+      "checkCommand": "optional-cli"
+    }
+    
+    // GOOD: Inform but don't block
+    {
+      "type": "info",
+      "title": "Optional: Install optional-cli",
+      "description": "This is optional but recommended..."
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### 5. Version Your Bundle
+
+Use semantic versioning in your bundle name:
+
+```json
+{
+  "version": "1.0",
+  "name": "webapp-onboarding-v2",
+  "description": "WebApp onboarding (v2.1.0)"
+}
+```
+
+## Maintenance
+
+### Updating the Bundle
+
+When requirements change:
+
+<Steps>
+  <Step title="Update bundle.json">
+    Add/modify onboarding steps as needed.
+  </Step>
+
+  <Step title="Update Scripts">
+    Modify setup/select/remove scripts to match.
+  </Step>
+
+  <Step title="Test Locally">
+    ```bash
+    # Create test workspace
+    gssh workspace add test-onboarding --project webapp
+    
+    # Verify scripts work
+    # Check .env file
+    # Confirm builds succeed
+    ```
+  </Step>
+
+  <Step title="Commit and Communicate">
+    ```bash
+    git add .gitspace/
+    git commit -m "Update onboarding: add Terraform requirement"
+    git push
+    
+    # Notify team in Slack
+    ```
+  </Step>
+</Steps>
+
+### Bundle Refresh
+
+Existing workspaces can re-run onboarding:
+
+```bash
+gssh workspace bundle refresh --project webapp --workspace my-feature
+```
+
+This is useful when:
+- Bundle steps change
+- New secrets are added
+- Configuration needs updating
+
+## Metrics and Feedback
+
+### Track Onboarding Success
+
+Add analytics to your scripts:
+
+```bash .gitspace/scripts/setup/99-analytics.sh
+#!/bin/bash
+
+WORKSPACE_NAME=$1
+
+# Log to internal analytics
+if [ -n "$ANALYTICS_ENDPOINT" ]; then
+  curl -X POST "$ANALYTICS_ENDPOINT/events" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"event\": \"workspace_setup_complete\",
+      \"workspace\": \"$WORKSPACE_NAME\",
+      \"team\": \"${TEAM_NAME:-unknown}\",
+      \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+    }" \
+    --silent --output /dev/null || true
+fi
+```
+
+### Collect Feedback
+
+```bash
+#!/bin/bash
+
+echo ""
+echo "═══════════════════════════════════════════════════"
+echo "🎉 Setup complete!"
+echo ""
+echo "How was your onboarding experience?"
+echo "Please share feedback: https://forms.company.com/dev-onboarding"
+echo "═══════════════════════════════════════════════════"
+echo ""
+```
+
+## Real-World Examples
+
+Check out these public repositories with GitSpace bundles:
+
+- **Next.js App**: `.gitspace/bundle.json` with Vercel deployment
+- **Python Django**: `setup/` scripts for virtualenv and database
+- **Go Microservice**: Docker Compose for local services
+- **React Native**: iOS/Android setup with bundle secrets
+
+<Note>
+Contributing your bundle examples helps the community! Consider open-sourcing your `.gitspace/` directory if it doesn't contain sensitive info.
+</Note>

@@ -1,0 +1,182 @@
+---
+title: gssh project list
+description: List all GitSpace projects
+---
+
+Display a list of all GitSpace projects with their repositories and workspace counts.
+
+## Usage
+
+```bash
+gssh project list [options]
+```
+
+## Description
+
+The `project list` command displays all projects in your GitSpace installation. Each project represents a GitHub repository with its associated workspaces. The output shows:
+
+- Project name
+- Repository URL (owner/repo format)
+- Current project indicator (`*`)
+- Workspace count (in verbose mode)
+
+## Options
+
+<ParamField path="--json" type="boolean" default="false">
+  Output the project list in JSON format instead of human-readable table format. Useful for scripting and automation.
+</ParamField>
+
+<ParamField path="--verbose" type="boolean" default="false">
+  Show additional details including workspace counts for each project.
+</ParamField>
+
+## Examples
+
+### List all projects
+
+```bash
+gssh project list
+```
+
+<CodeGroup>
+```bash Output
+Projects:
+  * my-project          username/my-project (current)
+    backend-api         company/backend-api
+    frontend            company/frontend
+```
+</CodeGroup>
+
+The asterisk (`*`) indicates the current active project.
+
+### List projects with workspace counts
+
+```bash
+gssh project list --verbose
+```
+
+<CodeGroup>
+```bash Output
+Projects:
+  * my-project          username/my-project            3 workspaces (current)
+    backend-api         company/backend-api            5 workspaces
+    frontend            company/frontend               2 workspaces
+```
+</CodeGroup>
+
+### JSON output for scripting
+
+```bash
+gssh project list --json
+```
+
+<CodeGroup>
+```json Output
+[
+  {
+    "name": "my-project",
+    "repository": "username/my-project",
+    "isCurrent": true,
+    "workspaceCount": 3,
+    "path": "/home/user/gitspace/my-project/workspaces"
+  },
+  {
+    "name": "backend-api",
+    "repository": "company/backend-api",
+    "isCurrent": false,
+    "workspaceCount": 5,
+    "path": "/home/user/gitspace/backend-api/workspaces"
+  }
+]
+```
+</CodeGroup>
+
+### No projects available
+
+```bash
+gssh project list
+```
+
+<CodeGroup>
+```bash Output
+No projects found
+
+Create a project:
+  gssh project add
+```
+</CodeGroup>
+
+## Output Format
+
+### Standard Mode
+
+Displays projects in a tabular format:
+- Column 1: Current indicator (`*` for current project, blank otherwise)
+- Column 2: Project name (padded to 20 characters)
+- Column 3: Repository URL
+- Suffix: `(current)` label for the active project
+
+### Verbose Mode
+
+Adds workspace count information:
+- Column 1: Current indicator
+- Column 2: Project name (padded to 20 characters)
+- Column 3: Repository URL (padded to 30 characters)
+- Column 4: Workspace count with "workspaces" label
+- Suffix: `(current)` label for the active project
+
+### JSON Mode
+
+Returns an array of project objects with fields:
+- `name` (string) - Project name
+- `repository` (string) - Repository URL
+- `isCurrent` (boolean) - Whether this is the current project
+- `workspaceCount` (number) - Number of workspaces
+- `path` (string) - Absolute path to workspaces directory
+
+## Use Cases
+
+### Scripting
+
+Use JSON output to parse projects programmatically:
+
+```bash
+# Get all project names
+gssh project list --json | jq -r '.[].name'
+
+# Count total workspaces
+gssh project list --json | jq '[.[].workspaceCount] | add'
+
+# Find current project
+gssh project list --json | jq -r '.[] | select(.isCurrent) | .name'
+```
+
+### Quick Overview
+
+Get a quick view of all your projects:
+
+```bash
+gssh project list
+```
+
+### Detailed Analysis
+
+See workspace distribution across projects:
+
+```bash
+gssh project list --verbose
+```
+
+## Current Project
+
+The current project is stored in the global configuration (`~/gitspace/.config.json`) and is used as the default for workspace operations. You can identify it by:
+
+- The asterisk (`*`) in the first column
+- The `(current)` suffix at the end of the line
+- The `isCurrent: true` field in JSON output
+
+## Related Commands
+
+- [`gssh project add`](/cli/project/add) - Add a new project
+- [`gssh project remove`](/cli/project/remove) - Remove a project
+- [`gssh workspace list`](/cli/workspace/list) - List workspaces in a project

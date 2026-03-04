@@ -1,0 +1,271 @@
+---
+title: gssh user host status
+description: Show hosting status and subdomain configuration
+---
+
+## Overview
+
+Display your current gitspace.sh hosting configuration, including primary subdomain, tunnel status, and credential sync state.
+
+## Usage
+
+```bash
+gssh user host status
+```
+
+## Output
+
+### When logged in with subdomain
+
+```bash
+Primary: brad.gitspace.sh
+Status: active
+Serve: brad.serve.gitspace.sh
+Tunnel token: configured
+Serve tunnel token: configured
+```
+
+### When not logged in
+
+```bash
+Not logged in or identity not found
+Run: gssh user auth login
+```
+
+### When logged in but no subdomain
+
+```bash
+No primary subdomain set.
+Run: gssh user host reserve <name>
+```
+
+### When API is unreachable
+
+```bash
+Could not verify status (API unreachable)
+Local config: brad.gitspace.sh
+Local serve: brad.serve.gitspace.sh
+```
+
+## Information Displayed
+
+<ParamField path="Primary" type="string">
+  Your primary subdomain used by default for `gssh relay start` and `gssh machine serve start`.
+</ParamField>
+
+<ParamField path="Status" type="string">
+  Subdomain status from gitspace.sh API:
+  - `active` - Ready to use
+  - `pending` - DNS propagation in progress
+  - `suspended` - Account issue (contact support)
+</ParamField>
+
+<ParamField path="Serve" type="string">
+  The serve subdomain used for machine daemon hosting (`<primary>.serve.gitspace.sh`).
+</ParamField>
+
+<ParamField path="Tunnel token" type="string">
+  Status of Cloudflare tunnel credentials:
+  - `configured` - Token stored in keychain
+  - `missing` - Need to fetch token
+</ParamField>
+
+<ParamField path="Serve tunnel token" type="string">
+  Status of serve tunnel credentials (same as tunnel token but for serve subdomain).
+</ParamField>
+
+## Automatic Token Sync
+
+If tunnel tokens are missing, `gssh user host status` will automatically:
+
+1. Fetch tokens from gitspace.sh API
+2. Store them in your system keychain
+3. Display success message:
+
+```bash
+Tunnel credentials missing, fetching...
+Tunnel credentials synced
+Serve tunnel credentials synced
+```
+
+<Note>
+  This ensures your tokens are always available for `gssh relay start` and `gssh machine serve start`.
+</Note>
+
+## Use Cases
+
+### Pre-flight check before starting services
+
+```bash
+# Check status
+gssh user host status
+
+# If configured, start relay
+gssh relay start
+```
+
+### Verify token sync on new machine
+
+```bash
+# Login from new machine
+gssh user auth login
+
+# Check and auto-sync tokens
+gssh user host status
+```
+
+### Troubleshoot tunnel issues
+
+```bash
+# Check if tokens are configured
+gssh user host status
+
+# If missing, status will auto-fetch
+# Then retry relay start
+gssh relay start
+```
+
+## Related Commands
+
+- [gssh user host reserve](/cli/host/reserve) - Reserve a subdomain
+- `gssh user host list` - List all your subdomains
+- `gssh user host set-primary` - Change primary subdomain
+- `gssh user host release` - Release a subdomain
+- `gssh user auth status` - Check authentication status
+- [gssh relay start](/cli/relay/start) - Start relay server
+- `gssh machine serve start` - Start machine daemon
+
+## Additional Commands
+
+### List All Subdomains
+
+```bash
+gssh user host list
+```
+
+Output:
+```
+Your subdomains:
+
+  ✓ brad.gitspace.sh (primary)
+    Created: 2024-01-10
+  ✓ dev-team.gitspace.sh
+    Created: 2024-01-12
+
+2/3 subdomains used (free tier)
+```
+
+### Set Primary Subdomain
+
+```bash
+gssh user host set-primary <subdomain>
+```
+
+Example:
+```bash
+gssh user host set-primary dev-team
+```
+
+Output:
+```
+dev-team.gitspace.sh is now your primary subdomain
+```
+
+### Release Subdomain
+
+```bash
+gssh user host release <subdomain>
+```
+
+Example:
+```bash
+gssh user host release old-project
+```
+
+Output:
+```
+Released: old-project.gitspace.sh
+```
+
+<Warning>
+  Releasing a subdomain will:
+  - Delete the Cloudflare tunnel
+  - Remove DNS records
+  - Clear local tunnel tokens
+  - Free up subdomain quota
+
+  **This action cannot be undone.** The subdomain becomes available for others to reserve.
+</Warning>
+
+## Configuration Files
+
+### Host Config
+
+`~/.gitspace/host.json`:
+```json
+{
+  "subdomain": "brad",
+  "serveSubdomain": "brad.serve",
+  "subdomains": ["brad", "dev-team"],
+  "createdAt": 1704067200000
+}
+```
+
+### Tunnel Tokens
+
+Stored in system keychain:
+```
+TUNNEL_TOKEN_brad
+TUNNEL_TOKEN_brad_serve
+TUNNEL_TOKEN_dev-team
+TUNNEL_TOKEN_dev-team_serve
+```
+
+## Troubleshooting
+
+### "Not logged in or identity not found"
+
+You need to authenticate and create an identity:
+
+```bash
+gssh user auth login
+gssh user identity init
+```
+
+### "No primary subdomain set"
+
+Reserve a subdomain:
+
+```bash
+gssh user host reserve <name>
+```
+
+### "Could not verify status (API unreachable)"
+
+The gitspace.sh API is unavailable. Possible causes:
+- No internet connection
+- API maintenance
+- Firewall blocking requests
+
+You can still use local config:
+```bash
+gssh relay start  # Uses cached host.json
+```
+
+### "Tunnel token: missing"
+
+Run `gssh user host status` again to auto-fetch, or manually sync:
+
+```bash
+# Logout and login to re-sync
+gssh user auth logout
+gssh user auth login
+```
+
+### "Could not fetch tunnel credentials"
+
+API error or network issue:
+1. Check internet connection
+2. Verify subdomain exists: `gssh user host list`
+3. Try again: `gssh user host status`
+4. If persists, contact support

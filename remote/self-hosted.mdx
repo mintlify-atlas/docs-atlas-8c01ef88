@@ -1,0 +1,679 @@
+---
+title: 'Self-Hosted Relay'
+description: 'Running your own relay server for complete control'
+icon: 'server'
+---
+
+For complete control over your infrastructure, you can run your own GitSpace relay server. This gives you full control over data routing, access policies, and server location.
+
+## When to Self-Host
+
+<CardGroup cols={2}>
+  <Card title="Corporate Networks" icon="building">
+    Keep all traffic within your corporate network or VPN
+  </Card>
+  
+  <Card title="Compliance" icon="gavel">
+    Meet regulatory requirements for data residency or air-gapped environments
+  </Card>
+  
+  <Card title="Custom Policies" icon="shield-check">
+    Implement custom authentication, rate limiting, or logging
+  </Card>
+  
+  <Card title="Cost Control" icon="dollar-sign">
+    Avoid hosted service costs for high-bandwidth or high-volume use
+  </Card>
+</CardGroup>
+
+<Info>
+Self-hosting requires managing TLS certificates, network security, and server uptime. Consider using [gitspace.sh hosting](/remote/gitspace-sh) if you don't need custom infrastructure.
+</Info>
+
+## Quick Start
+
+### Start Local Relay (Development)
+
+```bash
+gssh relay start --port 4480
+```
+
+Starts relay on `ws://localhost:4480/ws` with auto-generated Ed25519 identity.
+
+**Use for:**
+- Local development and testing
+- Single-machine setups (connect to own machine)
+- Learning how the relay works
+
+### Start Production Relay
+
+```bash
+# Generate persistent relay identity
+gssh user identity init  # If not already done
+
+# Start relay with TLS (behind reverse proxy)
+gssh relay start \
+  --port 8080 \
+  --bind 127.0.0.1
+
+# Or with custom identity
+RELAY_PRIVATE_KEY="<base64-ed25519-private-key>" \
+RELAY_LABEL="Production Relay" \
+  gssh relay start --port 8080
+```
+
+<Warning>
+**Do not expose relay directly to the internet without TLS.** Use a reverse proxy (nginx, Caddy, Traefik) to handle HTTPS and WebSocket upgrades.
+</Warning>
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Self-Hosted Infrastructure                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐         ┌──────────────┐                      │
+│  │  Clients     │         │ Reverse Proxy│                      │
+│  │              │◀───────▶│ (nginx/Caddy)│                      │
+│  │  Browser/CLI │  HTTPS  │              │                      │
+│  └──────────────┘         └──────┬───────┘                      │
+│                                  │ HTTP                          │
+│                                  ▼                               │
+│                          ┌──────────────┐                        │
+│                          │ Relay Server │                        │
+│                          │              │                        │
+│                          │ gssh relay   │                        │
+│                          │ start        │                        │
+│                          └──────┬───────┘                        │
+│                                 │                                │
+│                                 │ WebSocket                      │
+│                                 ▼                                │
+│                          ┌──────────────┐                        │
+│                          │  Machines    │                        │
+│                          │              │                        │
+│                          │ gssh serve   │                        │
+│                          └──────────────┘                        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Relay Server Setup
+
+### Installation
+
+<CodeGroup>
+
+```bash npm
+npm install -g gitspace
+gssh --version
+```
+
+```bash Docker
+docker pull gitspace/relay:latest
+```
+
+```bash From Source
+git clone https://github.com/gitspace-sh/gitspace.git
+cd gitspace
+bun install
+bun run build
+bun dist/relay/index.js
+```
+
+</CodeGroup>
+
+### Configuration
+
+Relay configuration uses environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `RELAY_PORT` | Port to listen on | `4480` |
+| `RELAY_BIND` | Bind address | `0.0.0.0` |
+| `RELAY_PRIVATE_KEY` | Base64 Ed25519 private key (64 bytes) | Auto-generated |
+| `RELAY_LABEL` | Human-readable relay name | None |
+| `RELAY_DB_PATH` | SQLite database path | `~/.gitspace/.relay/control/control.db` |
+
+**Generate relay identity:**
+
+```bash
+# Generate Ed25519 keypair
+node -e "const ed = require('@noble/curves/ed25519').ed25519; \
+const priv = ed.utils.randomPrivateKey(); \
+const pub = ed.getPublicKey(priv); \
+const secret = new Uint8Array(64); \
+secret.set(priv, 0); \
+secret.set(pub, 32); \
+console.log('RELAY_PRIVATE_KEY=' + Buffer.from(secret).toString('base64'));"
+```
+
+Store the output in your environment or systemd service file.
+
+### Systemd Service (Linux)
+
+Create `/etc/systemd/system/gitspace-relay.service`:
+
+```ini
+[Unit]
+Description=GitSpace Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=gitspace
+WorkingDirectory=/opt/gitspace
+Environment="RELAY_PORT=8080"
+Environment="RELAY_BIND=127.0.0.1"
+Environment="RELAY_PRIVATE_KEY=<your-base64-key>"
+Environment="RELAY_LABEL=Production Relay"
+ExecStart=/usr/local/bin/gssh relay start --port 8080 --bind 127.0.0.1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Enable and start:**
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable gitspace-relay
+sudo systemctl start gitspace-relay
+sudo systemctl status gitspace-relay
+```
+
+### Docker Deployment
+
+**docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  relay:
+    image: gitspace/relay:latest
+    container_name: gitspace-relay
+    restart: always
+    environment:
+      - RELAY_PORT=8080
+      - RELAY_BIND=0.0.0.0
+      - RELAY_PRIVATE_KEY=${RELAY_PRIVATE_KEY}
+      - RELAY_LABEL=Production Relay
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+      - ./relay-db:/root/.gitspace/.relay
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+**Start:**
+
+```bash
+export RELAY_PRIVATE_KEY="<your-base64-key>"
+docker-compose up -d
+docker-compose logs -f relay
+```
+
+## Reverse Proxy Setup
+
+### Nginx
+
+```nginx
+upstream gitspace_relay {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name relay.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/relay.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/relay.example.com/privkey.pem;
+
+    # WebSocket upgrade headers
+    location /ws {
+        proxy_pass http://gitspace_relay;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeouts for long-lived connections
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://gitspace_relay;
+    }
+
+    # Web client static files (optional)
+    location / {
+        proxy_pass http://gitspace_relay;
+    }
+}
+```
+
+**Test configuration:**
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Caddy
+
+```caddyfile
+relay.example.com {
+    # WebSocket endpoint
+    @websocket {
+        path /ws
+    }
+    reverse_proxy @websocket localhost:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+    }
+
+    # Health check
+    reverse_proxy /health localhost:8080
+
+    # Web client
+    reverse_proxy /* localhost:8080
+}
+```
+
+**Reload:**
+
+```bash
+sudo caddy reload
+```
+
+### Traefik
+
+**docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--providers.docker=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@example.com"
+    ports:
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  relay:
+    image: gitspace/relay:latest
+    environment:
+      - RELAY_PORT=8080
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.relay.rule=Host(`relay.example.com`)"
+      - "traefik.http.routers.relay.tls.certresolver=letsencrypt"
+      - "traefik.http.services.relay.loadbalancer.server.port=8080"
+```
+
+## Machine Enrollment
+
+### Create Enrollment Invite
+
+On a device with relay access (same owner identity):
+
+```bash
+# Get machine public keys
+MACHINE_SIGNING_KEY=$(gssh user identity show --json | jq -r '.signingPublicKey')
+MACHINE_KEX_KEY=$(gssh user identity show --json | jq -r '.keyExchangePublicKey')
+
+# Create invite
+gssh invite relay-machine create \
+  --relay wss://relay.example.com/ws \
+  --machine-signing-key "$MACHINE_SIGNING_KEY" \
+  --machine-key-exchange-key "$MACHINE_KEX_KEY" \
+  --label "Production Server" \
+  --max-uses 1 \
+  --expires 24h
+```
+
+**Output:**
+
+```
+Created relay-machine invite: inv_abc123...
+
+Invite Token:
+wss://relay.example.com/ws#eyJ0eXAiOiJKV1QiLCJhbGc...
+
+Share this token with the machine to enroll.
+Token expires: 2026-03-05T10:30:00.000Z
+Max uses: 1
+```
+
+### Enroll Machine
+
+On the machine to enroll:
+
+```bash
+gssh machine enroll --invite "wss://relay.example.com/ws#eyJ0eXAi..."
+```
+
+<Steps>
+  <Step title="Parse invite token">
+    Extracts relay URL and invite payload from token
+  </Step>
+  
+  <Step title="Verify signature">
+    Checks token was signed by owner user root
+  </Step>
+  
+  <Step title="Check expiration">
+    Validates token hasn't expired
+  </Step>
+  
+  <Step title="Register with relay">
+    Sends `register_machine` with enrollment token
+  </Step>
+  
+  <Step title="Save relay config">
+    Stores relay URL in `~/.gitspace/.identity/relay.json`
+  </Step>
+</Steps>
+
+**Verify enrollment:**
+
+```bash
+gssh relay machines list
+```
+
+## Access Management
+
+### List Enrolled Machines
+
+```bash
+gssh relay machines list
+```
+
+**Example output:**
+
+```
+Enrolled Machines:
+  Machine ID        Label              Status    Enrolled
+  abc123...         Production Server  online    2026-03-01
+  def456...         Dev Workstation    offline   2026-02-28
+  ghi789...         CI Runner          online    2026-03-02
+```
+
+### Revoke Machine
+
+```bash
+gssh relay machines revoke abc123...
+```
+
+Removes machine from registry. Machine will be rejected on next registration attempt.
+
+### List Invites
+
+```bash
+gssh invite list --type relay-machine
+```
+
+Shows all active relay-machine invites:
+
+```
+Active Invites:
+  Invite ID     Type            Label              Expires              Used
+  inv_abc123    relay-machine   Production Server  2026-03-05T10:30:00  0/1
+  inv_def456    relay-machine   New Machine        2026-03-10T14:00:00  1/5
+```
+
+### Revoke Invite
+
+```bash
+gssh invite revoke inv_abc123
+```
+
+Marks invite as revoked. Tokens from this invite can no longer be used.
+
+## Monitoring
+
+### Health Check
+
+```bash
+curl https://relay.example.com/health
+```
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "uptime": 86400,
+  "machines": 5,
+  "connections": 12,
+  "version": "1.0.0"
+}
+```
+
+### Relay Statistics
+
+Check relay logs for statistics:
+
+```bash
+sudo journalctl -u gitspace-relay -f
+```
+
+**Log entries:**
+
+```
+[relay] Machine registered: abc123... (label: Production Server)
+[relay] Client connected: def456... → abc123...
+[relay] X3DH handshake complete: session xyz789
+[relay] Data routed: 1.2 MB (abc123 ← def456)
+```
+
+### Metrics (Prometheus)
+
+<Accordion title="Prometheus Integration (Future)">
+Metrics endpoint is planned but not yet implemented:
+
+```bash
+curl https://relay.example.com/metrics
+```
+
+Will expose:
+- Active machine count
+- Active connection count
+- Data throughput (bytes/sec)
+- Handshake success/failure rate
+- Message queue depth
+
+See [GitHub Issue #42](https://github.com/gitspace-sh/gitspace/issues/42) for progress.
+</Accordion>
+
+## Security
+
+### Network Security
+
+<AccordionGroup>
+  <Accordion title="Firewall Rules">
+    **Allow:**
+    - Port 443 (HTTPS/WSS) from anywhere
+    - Port 8080 (relay) from localhost only
+    
+    **Block:**
+    - Direct access to relay port (8080) from internet
+    - All other inbound traffic
+
+    **iptables example:**
+    ```bash
+    # Allow HTTPS
+    iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+    
+    # Block direct relay access
+    iptables -A INPUT -p tcp --dport 8080 ! -s 127.0.0.1 -j DROP
+    ```
+  </Accordion>
+  
+  <Accordion title="TLS Configuration">
+    **Required:**
+    - TLS 1.2 or higher
+    - Strong cipher suites only (no RC4, 3DES, MD5)
+    - HSTS header (max-age=31536000)
+    - Valid certificate from trusted CA (Let's Encrypt recommended)
+
+    **nginx example:**
+    ```nginx
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256';
+    ssl_prefer_server_ciphers on;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate Limiting">
+    Relay has built-in connection rate limiting:
+    - Max 20 connections per IP per minute
+    - Automatic cleanup of old entries
+
+    For additional protection, use reverse proxy rate limiting:
+
+    **nginx:**
+    ```nginx
+    limit_req_zone $binary_remote_addr zone=relay:10m rate=10r/s;
+    
+    location /ws {
+        limit_req zone=relay burst=20;
+        proxy_pass http://gitspace_relay;
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Backup and Recovery
+
+<Steps>
+  <Step title="Backup relay identity">
+    ```bash
+    # Export relay private key
+    echo "$RELAY_PRIVATE_KEY" > relay-key.txt
+    chmod 600 relay-key.txt
+    
+    # Store securely (encrypted backup, HSM, etc.)
+    ```
+  </Step>
+  
+  <Step title="Backup relay database">
+    ```bash
+    # Stop relay
+    sudo systemctl stop gitspace-relay
+    
+    # Backup SQLite database
+    cp ~/.gitspace/.relay/control/control.db control.db.backup
+    
+    # Restart relay
+    sudo systemctl start gitspace-relay
+    ```
+  </Step>
+  
+  <Step title="Test recovery">
+    ```bash
+    # On new server, restore key
+    export RELAY_PRIVATE_KEY=$(cat relay-key.txt)
+    
+    # Restore database
+    mkdir -p ~/.gitspace/.relay/control
+    cp control.db.backup ~/.gitspace/.relay/control/control.db
+    
+    # Start relay
+    gssh relay start
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### "Connection refused"
+
+**Problem**: Machines can't connect to relay.
+
+**Solutions**:
+
+```bash
+# Check relay is running
+sudo systemctl status gitspace-relay
+
+# Check port is listening
+sudo netstat -tlnp | grep 8080
+
+# Test from machine
+wscat -c ws://relay.example.com/ws
+
+# Check reverse proxy
+sudo nginx -t
+sudo systemctl status nginx
+```
+
+### "TLS handshake failed"
+
+**Problem**: WebSocket upgrade fails with TLS error.
+
+**Solutions**:
+
+```bash
+# Check certificate validity
+echo | openssl s_client -connect relay.example.com:443 -servername relay.example.com
+
+# Verify cert chain
+curl -v https://relay.example.com/health
+
+# Check nginx SSL config
+sudo nginx -t
+```
+
+### "Machine registration failed"
+
+**Problem**: Machine sends `register_machine` but gets rejected.
+
+**Solutions**:
+
+```bash
+# Check relay logs
+sudo journalctl -u gitspace-relay -n 100
+
+# Verify enrollment token
+gssh invite list --type relay-machine
+
+# Check machine identity
+gssh user identity show
+
+# Re-create enrollment invite
+gssh invite relay-machine create ...
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Deep Dive" icon="shield" href="/remote/security">
+    Learn about relay security model and threat mitigation
+  </Card>
+  
+  <Card title="Troubleshooting" icon="wrench" href="/advanced/troubleshooting">
+    Troubleshoot relay and connection issues
+  </Card>
+</CardGroup>

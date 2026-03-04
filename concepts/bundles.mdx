@@ -1,0 +1,712 @@
+---
+title: 'Bundles'
+description: 'Repo config bundles for team onboarding and environment setup'
+---
+
+## Overview
+
+Bundles are configuration packages that automate team onboarding and environment setup. They contain:
+
+- **Onboarding steps** to collect config values and verify dependencies
+- **Custom scripts** for setup, terminal attach, and cleanup phases
+- **Bundle manifest** (`bundle.json`) defining the onboarding flow
+
+When a teammate clones a project with a bundle, they're automatically guided through setup and have all necessary scripts installed.
+
+## Bundle Structure
+
+A typical bundle lives in the `.gitspace/` directory of your repository:
+
+```
+.gitspace/
+├── bundle.json              # Bundle manifest
+└── scripts/
+    ├── setup/               # Run on setup state change
+    │   ├── 01-install-deps.sh
+    │   ├── 02-build.sh
+    │   └── 03-copy-env.sh
+    ├── select/              # Run on each terminal attach
+    │   ├── 01-git-fetch.sh
+    │   └── 02-show-status.sh
+    └── remove/              # Run before workspace deletion
+        └── 01-cleanup-cache.sh
+```
+
+<Note>
+Bundle detection is implemented in `src/core/bundle.ts:59-81`. GitSpace automatically discovers bundles in `.gitspace/`, `.spaces/`, or the repository root.
+</Note>
+
+## Bundle Manifest
+
+The `bundle.json` file defines the onboarding flow:
+
+```json
+{
+  "version": "1.0",
+  "name": "my-app-bundle",
+  "description": "Setup bundle for my-app development",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to my-app",
+      "description": "This will guide you through setting up your dev environment."
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js 18+",
+      "description": "Node.js 18 or higher is required",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "api-key",
+      "type": "secret",
+      "title": "API Key",
+      "description": "Enter your development API key",
+      "configKey": "apiKey"
+    },
+    {
+      "id": "team-name",
+      "type": "input",
+      "title": "Team Name",
+      "description": "Which team are you on?",
+      "configKey": "teamName",
+      "defaultValue": "engineering"
+    }
+  ]
+}
+```
+
+### Schema Definition
+
+```typescript
+// src/types/bundle.ts:91-102
+export interface SpacesBundle {
+  version: '1.0'
+  name: string
+  description?: string
+  onboarding?: OnboardingStep[]
+}
+```
+
+<Info>
+Bundle validation is performed by `src/core/bundle.ts:199-311` and ensures:
+- Valid version (`1.0`)
+- Unique step IDs
+- Valid step types
+- No config key collisions
+- Shell-safe environment variable names
+</Info>
+
+## Onboarding Step Types
+
+### Info Step
+
+Display information to the user (no input required):
+
+```json
+{
+  "id": "welcome",
+  "type": "info",
+  "title": "Welcome",
+  "description": "Let's get you set up! This will take about 5 minutes."
+}
+```
+
+### Confirm Step
+
+Verify a dependency or prerequisite is installed:
+
+```json
+{
+  "id": "docker",
+  "type": "confirm",
+  "title": "Docker",
+  "description": "Docker is required for local development",
+  "checkCommand": "docker",
+  "installUrl": "https://docs.docker.com/get-docker/",
+  "confirmPrompt": "Is Docker installed and running?"
+}
+```
+
+**Fields:**
+- `checkCommand` - Command to verify installation (checks if in PATH)
+- `installUrl` - URL for installation instructions
+- `confirmPrompt` - Custom prompt text (default: "Continue?")
+
+<Accordion title="Check Command Behavior">
+When `checkCommand` is provided:
+
+1. GitSpace runs `which <checkCommand>` to verify it's in PATH
+2. If found: Shows ✓ and auto-continues
+3. If not found: Shows installation URL and prompts for confirmation
+4. User can choose to skip or retry check
+
+Implemented in `src/utils/onboarding.ts`.
+</Accordion>
+
+### Secret Step
+
+Collect sensitive values (masked input, stored in OS keychain):
+
+```json
+{
+  "id": "db-password",
+  "type": "secret",
+  "title": "Database Password",
+  "description": "Enter the password for the dev database",
+  "configKey": "dbPassword",
+  "validationPattern": "^.{8,}$",
+  "validationMessage": "Password must be at least 8 characters"
+}
+```
+
+**Fields:**
+- `configKey` - Key used to store/retrieve secret (becomes environment variable)
+- `validationPattern` - Optional regex pattern for validation
+- `validationMessage` - Error message when validation fails
+
+<Warning>
+**Security:**
+
+Secrets are stored in the OS keychain via `Bun.secrets`:
+- **macOS:** Keychain Access
+- **Linux:** libsecret (GNOME Keyring, KWallet, etc.)
+- **Never stored** in `.config.json` files
+
+Implemented in `src/utils/secrets.ts`.
+</Warning>
+
+### Input Step
+
+Collect non-sensitive configuration values:
+
+```json
+{
+  "id": "aws-region",
+  "type": "input",
+  "title": "AWS Region",
+  "description": "Which AWS region should be used?",
+  "configKey": "awsRegion",
+  "defaultValue": "us-west-2",
+  "validationPattern": "^[a-z]{2}-[a-z]+-\\d+$",
+  "validationMessage": "Must be valid AWS region (e.g., us-west-2)"
+}
+```
+
+**Fields:**
+- `configKey` - Key used to store value in project config
+- `defaultValue` - Pre-filled value (can be edited)
+- `validationPattern` - Optional regex pattern for validation
+- `validationMessage` - Error message when validation fails
+
+## Config Key Naming
+
+### Environment Variable Export
+
+Config keys are exported to scripts as environment variables in two forms:
+
+1. **Exact key name:** `$apiKey`, `$teamName`, `$awsRegion`
+2. **Normalized uppercase snake-case:** `$API_KEY`, `$TEAM_NAME`, `$AWS_REGION`
+
+```bash
+#!/bin/bash
+# Both forms work in scripts:
+echo "API Key: $apiKey"       # Exact
+echo "API Key: $API_KEY"     # Normalized
+echo "Team: $teamName"        # Exact
+echo "Team: $TEAM_NAME"       # Normalized
+```
+
+### Validation Rules
+
+```typescript
+// src/utils/normalize-env-key.ts
+// Shell variable names must match: [A-Za-z_][A-Za-z0-9_]*
+```
+
+**Valid:**
+- `apiKey` → `$apiKey` + `$API_KEY`
+- `team_name` → `$team_name` + `$TEAM_NAME`
+- `AWS_REGION` → `$AWS_REGION` + `$AWS_REGION`
+
+**Invalid:**
+- `123key` - starts with number
+- `api-key` - contains hyphen (normalized to `API_KEY` which is valid)
+
+<Note>
+Key validation is performed by `src/core/bundle.ts:213-309` to ensure no collisions between normalized aliases.
+</Note>
+
+## Bundle Sources
+
+### In-Repo Bundle (Automatic)
+
+Place `.gitspace/` directory in your repository:
+
+```bash
+git add .gitspace/
+git commit -m "Add GitSpace bundle"
+git push
+```
+
+When anyone clones the project, the bundle is automatically detected:
+
+```bash
+gssh project add
+# Selects repository with .gitspace/ bundle
+# Onboarding runs automatically
+```
+
+### Local Bundle Path
+
+Use a bundle from a local directory:
+
+```bash
+gssh project add --bundle-path /path/to/bundle/
+```
+
+Useful for:
+- Testing bundles before committing
+- Organization-wide bundles stored separately
+- Custom bundles for specific environments
+
+### Remote Bundle URL
+
+Load a bundle from a remote URL (zip archive):
+
+```bash
+gssh project add --bundle-url https://example.com/bundles/my-app.zip
+```
+
+The zip should contain:
+```
+my-app-bundle/
+├── bundle.json
+└── scripts/
+    └── ...
+```
+
+GitSpace extracts it to a temporary directory, runs onboarding, then cleans up.
+
+<Info>
+Remote bundle loading is implemented in `src/core/bundle.ts:120-194` with zip-slip protection via `assertSafeExtractedPaths()`.
+</Info>
+
+## Bundle Values Storage
+
+### Project Configuration
+
+Non-sensitive values are stored in `~/gitspace/<project>/.config.json`:
+
+```json
+{
+  "name": "my-app",
+  "repository": "myorg/my-app",
+  "bundleValues": {
+    "teamName": "engineering",
+    "awsRegion": "us-west-2",
+    "nodeVersion": "18"
+  },
+  "bundleSecretKeys": [
+    "apiKey",
+    "dbPassword"
+  ]
+}
+```
+
+**Note:** `bundleSecretKeys` lists secret keys but **not** their values. Values are in OS keychain.
+
+### OS Keychain (Secrets)
+
+Secret values are stored securely:
+
+```typescript
+// src/utils/secrets.ts
+import { getSecret, setSecret } from 'bun:secret'
+
+// Store secret
+await setSecret(`gitspace:my-app:apiKey`, 'sk_live_abc123')
+
+// Retrieve secret
+const apiKey = await getSecret(`gitspace:my-app:apiKey`)
+```
+
+**Keychain format:** `gitspace:<project-name>:<configKey>`
+
+## Bundle State Tracking
+
+### Workspace-Specific State
+
+Each workspace tracks which bundle version it has applied:
+
+```json
+{
+  "bundleWorkspaceState": {
+    "feature-auth": {
+      "scope": "feature-auth",
+      "bundleHash": "abc123def456",
+      "requiredInputKeys": ["teamName", "awsRegion"],
+      "requiredSecretKeys": ["apiKey", "dbPassword"],
+      "confirmFingerprints": ["node-check-xyz"],
+      "updatedAt": "2025-01-15T12:00:00Z"
+    },
+    "__base__": {
+      "scope": "__base__",
+      "bundleHash": "abc123def456",
+      "requiredInputKeys": ["teamName"],
+      "requiredSecretKeys": ["apiKey"],
+      "confirmFingerprints": [],
+      "updatedAt": "2025-01-10T08:00:00Z"
+    }
+  }
+}
+```
+
+**Scopes:**
+- `__base__` - Base repository bundle state
+- `<workspace-name>` - Per-workspace bundle state
+
+### Confirm Step History
+
+Results of confirm/check steps are cached:
+
+```json
+{
+  "bundleConfirmHistory": {
+    "node-check-xyz": {
+      "fingerprint": "node-check-xyz",
+      "stepId": "node",
+      "checkCommand": "node",
+      "status": "passed",
+      "scope": "feature-auth",
+      "bundleHash": "abc123def456",
+      "checkedAt": "2025-01-15T12:00:00Z"
+    }
+  }
+}
+```
+
+This prevents re-prompting for the same check across workspaces.
+
+<Info>
+Bundle state tracking is defined in `src/types/config.ts:186-219` and managed by `src/core/bundle-refresh.ts`.
+</Info>
+
+## Bundle Refresh
+
+Re-run onboarding when bundle configuration changes:
+
+```bash
+# Interactive refresh (keeps previous values as defaults)
+gssh workspace bundle refresh --project my-app --workspace feature-auth
+
+# Force refresh (re-prompts for all values)
+gssh workspace bundle refresh --project my-app --workspace feature-auth --force
+```
+
+### When to Refresh
+
+Refresh is needed when:
+- Bundle `bundle.json` changes (new steps, modified keys)
+- Bundle scripts are updated
+- Bundle values need to be changed
+- Secret keys expire and need rotation
+
+### Refresh Behavior
+
+1. **Detects changes** by comparing bundle hash
+2. **Shows diff** of what changed (new steps, modified steps)
+3. **Keeps previous values** as defaults (unless `--force`)
+4. **Re-runs setup scripts** after collecting new values
+5. **Updates workspace state** with new bundle hash
+
+<Accordion title="Bundle Hash Calculation">
+```typescript
+// Simplified from src/core/bundle-refresh.ts
+import { createHash } from 'crypto'
+
+function computeBundleHash(bundle: SpacesBundle): string {
+  const canonical = JSON.stringify(bundle, null, 0)
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16)
+}
+```
+
+Hash includes entire bundle definition (steps, scripts, metadata).
+</Accordion>
+
+## Using Bundle Values in Scripts
+
+Bundle values are automatically exported as environment variables:
+
+```bash
+#!/bin/bash
+# .gitspace/scripts/setup/01-install-deps.sh
+
+WORKSPACE_NAME=$1
+REPOSITORY=$2
+
+# Access bundle values by configKey
+echo "Setting up for team: $teamName"     # or $TEAM_NAME
+echo "Using region: $awsRegion"           # or $AWS_REGION
+
+# Access secrets (stored in OS keychain)
+if [ -n "$apiKey" ]; then
+  echo "API_KEY=\"$apiKey\"" > .env.local
+fi
+
+# Install dependencies
+npm install
+```
+
+### Script Arguments
+
+All scripts receive two positional arguments:
+
+1. `$1` - Workspace name
+2. `$2` - Repository (owner/repo)
+
+### Script Environment
+
+```bash
+# Current directory: workspace path
+PWD=/Users/me/gitspace/my-app/workspaces/feature-auth
+
+# Bundle values as environment variables:
+teamName=engineering
+TEAM_NAME=engineering
+awsRegion=us-west-2
+AWS_REGION=us-west-2
+
+# Secrets from OS keychain:
+apiKey=sk_live_abc123
+API_KEY=sk_live_abc123
+dbPassword=super_secret_password
+DB_PASSWORD=super_secret_password
+```
+
+<Note>
+Environment variable setup is implemented in `src/utils/run-scripts.ts:206-243` with collision detection and validation.
+</Note>
+
+## Example Bundle
+
+Complete example for a Node.js + AWS + PostgreSQL project:
+
+```json
+{
+  "version": "1.0",
+  "name": "backend-api-bundle",
+  "description": "Setup for backend API development",
+  "onboarding": [
+    {
+      "id": "welcome",
+      "type": "info",
+      "title": "Welcome to Backend API",
+      "description": "This will set up your local development environment."
+    },
+    {
+      "id": "node",
+      "type": "confirm",
+      "title": "Node.js 18+",
+      "description": "Node.js 18 or higher is required",
+      "checkCommand": "node",
+      "installUrl": "https://nodejs.org"
+    },
+    {
+      "id": "docker",
+      "type": "confirm",
+      "title": "Docker",
+      "description": "Docker is required for running PostgreSQL locally",
+      "checkCommand": "docker",
+      "installUrl": "https://docs.docker.com/get-docker/"
+    },
+    {
+      "id": "aws-cli",
+      "type": "confirm",
+      "title": "AWS CLI",
+      "description": "AWS CLI is required for accessing S3",
+      "checkCommand": "aws",
+      "installUrl": "https://aws.amazon.com/cli/"
+    },
+    {
+      "id": "aws-region",
+      "type": "input",
+      "title": "AWS Region",
+      "description": "Which AWS region should be used?",
+      "configKey": "awsRegion",
+      "defaultValue": "us-west-2"
+    },
+    {
+      "id": "aws-access-key",
+      "type": "secret",
+      "title": "AWS Access Key ID",
+      "description": "Enter your AWS access key ID",
+      "configKey": "awsAccessKeyId"
+    },
+    {
+      "id": "aws-secret-key",
+      "type": "secret",
+      "title": "AWS Secret Access Key",
+      "description": "Enter your AWS secret access key",
+      "configKey": "awsSecretAccessKey"
+    },
+    {
+      "id": "db-password",
+      "type": "secret",
+      "title": "Database Password",
+      "description": "Enter the password for the local dev database",
+      "configKey": "dbPassword",
+      "validationPattern": "^.{8,}$",
+      "validationMessage": "Password must be at least 8 characters"
+    }
+  ]
+}
+```
+
+### Corresponding Scripts
+
+```bash
+# .gitspace/scripts/setup/01-install-deps.sh
+#!/bin/bash
+set -e
+
+WORKSPACE=$1
+REPO=$2
+
+echo "Installing dependencies for $WORKSPACE..."
+npm install
+
+# .gitspace/scripts/setup/02-setup-aws.sh
+#!/bin/bash
+set -e
+
+echo "Configuring AWS credentials..."
+mkdir -p ~/.aws
+cat > ~/.aws/credentials <<EOF
+[dev]
+aws_access_key_id = $awsAccessKeyId
+aws_secret_access_key = $awsSecretAccessKey
+EOF
+
+cat > ~/.aws/config <<EOF
+[profile dev]
+region = $awsRegion
+output = json
+EOF
+
+echo "AWS configured for region: $awsRegion"
+
+# .gitspace/scripts/setup/03-setup-database.sh
+#!/bin/bash
+set -e
+
+echo "Starting PostgreSQL in Docker..."
+docker run -d \
+  --name dev-postgres \
+  -e POSTGRES_PASSWORD=$dbPassword \
+  -p 5432:5432 \
+  postgres:15
+
+echo "Waiting for PostgreSQL to be ready..."
+sleep 3
+
+echo "Running migrations..."
+DATABASE_URL="postgresql://postgres:$dbPassword@localhost:5432/myapp" \
+  npm run migrate
+
+echo "Database setup complete!"
+
+# .gitspace/scripts/select/01-status.sh
+#!/bin/bash
+
+echo "Workspace: $1"
+echo "AWS Region: $awsRegion"
+git fetch --quiet origin
+git status -sb
+
+# .gitspace/scripts/remove/01-cleanup.sh
+#!/bin/bash
+
+echo "Stopping PostgreSQL container..."
+docker stop dev-postgres 2>/dev/null || true
+docker rm dev-postgres 2>/dev/null || true
+
+echo "Cleanup complete!"
+```
+
+## Best Practices
+
+### Security
+
+<Warning>
+**Never commit secrets to bundle.json or scripts!**
+
+- Use `secret` steps for API keys, passwords, tokens
+- Secrets are stored in OS keychain, not git
+- Use `input` steps for non-sensitive config
+</Warning>
+
+### Validation
+
+```json
+{
+  "id": "email",
+  "type": "input",
+  "title": "Email",
+  "configKey": "userEmail",
+  "validationPattern": "^[^@]+@[^@]+\\.[^@]+$",
+  "validationMessage": "Must be a valid email address"
+}
+```
+
+Always validate user input to prevent configuration errors.
+
+### Script Organization
+
+Use numbered prefixes for execution order:
+
+```
+scripts/setup/
+├── 01-install-deps.sh
+├── 02-build.sh
+├── 03-copy-env.sh
+└── 04-seed-data.sh
+```
+
+Scripts run alphabetically (enforced by `src/utils/run-scripts.ts:84`).
+
+### Error Handling
+
+```bash
+#!/bin/bash
+set -e  # Exit on error
+
+if ! command -v node &>/dev/null; then
+  echo "Error: Node.js is not installed"
+  exit 1
+fi
+
+npm install || {
+  echo "Error: npm install failed"
+  exit 1
+}
+```
+
+Always handle errors gracefully with clear messages.
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Scripts" icon="code" href="/concepts/scripts">
+    Learn about convention-based custom scripts
+  </Card>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Top-level containers for repositories
+  </Card>
+  <Card title="Workspaces" icon="folder-tree" href="/concepts/workspaces">
+    Git worktrees for parallel development
+  </Card>
+</CardGroup>

@@ -1,0 +1,207 @@
+---
+title: gssh project remove
+description: Remove a GitSpace project and all its workspaces
+---
+
+Permanently delete a GitSpace project, including all workspaces and configuration.
+
+## Usage
+
+```bash
+gssh project remove [project-name] [options]
+```
+
+## Description
+
+The `project remove` command permanently deletes a GitSpace project and all its associated data:
+
+- Project directory at `~/gitspace/<project-name>/`
+- All workspace worktrees
+- All active terminal sessions
+- Project configuration
+
+<Warning>
+  This operation is **destructive** and **cannot be undone**. All uncommitted changes in workspaces will be lost.
+</Warning>
+
+## Arguments
+
+<ParamField path="project-name" type="string" optional>
+  Name of the project to remove. If omitted, an interactive picker will be displayed.
+</ParamField>
+
+## Options
+
+<ParamField path="--force" type="boolean" default="false">
+  Skip all confirmation prompts. Use with caution as this will immediately delete the project without asking for confirmation.
+</ParamField>
+
+## Examples
+
+### Interactive removal
+
+```bash
+gssh project remove
+```
+
+<CodeGroup>
+```bash Interactive Flow
+? Select project to remove:
+  > my-project - username/my-project
+    backend-api - company/backend-api
+    frontend - company/frontend
+
+This will permanently delete project "my-project" and all its data:
+  - Project directory: /home/user/gitspace/my-project
+  - Workspaces: 3
+
+? Type the project name "my-project" to confirm: my-project
+Removing project...
+✓ Removed project: my-project
+ℹ Killed 2 active session(s)
+ℹ Cleaned up 3 workspace(s)
+ℹ Cleared current project (was this project)
+```
+</CodeGroup>
+
+### Remove specific project
+
+```bash
+gssh project remove backend-api
+```
+
+Removes the `backend-api` project after confirmation.
+
+### Force removal without confirmation
+
+```bash
+gssh project remove my-project --force
+```
+
+<Warning>
+  Force mode bypasses all safety checks and immediately deletes the project. Use only in scripts or when you're absolutely certain.
+</Warning>
+
+## Interactive Confirmation
+
+Unless `--force` is specified, the command requires you to type the project name exactly to confirm deletion:
+
+<CodeGroup>
+```bash Confirmation Required
+? Type the project name "my-project" to confirm: my-project
+✓ Confirmed
+```
+
+```bash Name Mismatch
+? Type the project name "my-project" to confirm: my-projet
+Cancelled (name mismatch)
+```
+</CodeGroup>
+
+## What Gets Deleted
+
+The removal process cleans up:
+
+1. **All workspace worktrees** - Each workspace directory is removed
+2. **Active terminal sessions** - All tmux-lite sessions for the project are killed
+3. **Workspace branches** - Git branches are deleted (following workspace settings)
+4. **Remove scripts** - Custom cleanup scripts in `.gitspace/scripts/remove/` are executed
+5. **Project directory** - The entire project directory is deleted
+6. **Project configuration** - Project-specific config is removed
+7. **Current project pointer** - Cleared if this was the current project
+
+## Deletion Results
+
+After successful removal, the command reports:
+
+- Total number of active sessions killed
+- Total number of workspaces deleted
+- Whether the current project pointer was cleared
+- Any partial errors that occurred during cleanup
+
+<CodeGroup>
+```bash Successful Removal
+✓ Removed project: my-project
+ℹ Killed 2 active session(s)
+ℹ Cleaned up 3 workspace(s)
+ℹ Cleared current project (was this project)
+```
+
+```bash Partial Errors
+✓ Removed project: my-project
+⚠ Some cleanup operations had issues:
+  ⚠ Failed to delete branch: feature/new-ui (checked out elsewhere)
+ℹ Killed 1 active session(s)
+ℹ Cleaned up 2 workspace(s)
+```
+</CodeGroup>
+
+## Error Handling
+
+### No projects found
+
+```bash
+gssh project remove
+```
+
+<CodeGroup>
+```bash Error
+✗ Error: No projects found
+```
+</CodeGroup>
+
+### Project not found
+
+```bash
+gssh project remove nonexistent-project
+```
+
+<CodeGroup>
+```bash Error
+✗ Error: Project "nonexistent-project" not found
+```
+</CodeGroup>
+
+### Cancelled by user
+
+<CodeGroup>
+```bash User Cancelled
+? Type the project name "my-project" to confirm: 
+Cancelled (name mismatch)
+```
+</CodeGroup>
+
+## Cleanup Scripts
+
+If workspaces contain custom remove scripts at `.gitspace/scripts/remove/`, they will be executed before deletion. This allows for:
+
+- Stopping background services
+- Cleaning up Docker containers
+- Removing generated files
+- Custom teardown logic
+
+<Note>
+  If a remove script fails, the command will still attempt to remove the workspace, but will log warnings about failed cleanup operations.
+</Note>
+
+## Non-Interactive Mode
+
+When running in non-interactive environments (CI/CD, scripts), the removal process:
+
+- Skips interactive prompts if `--force` is provided
+- Executes remove scripts with `nonInteractive: false` flag
+- Reports all errors and warnings to stderr
+
+## Current Project Handling
+
+If you remove the current project:
+
+1. The global current project pointer is cleared
+2. You'll need to switch to another project or create a new one
+3. The command reports: "Cleared current project (was this project)"
+
+## Related Commands
+
+- [`gssh project add`](/cli/project/add) - Add a new project
+- [`gssh project list`](/cli/project/list) - List all projects
+- [`gssh workspace remove`](/cli/workspace/remove) - Remove individual workspaces
