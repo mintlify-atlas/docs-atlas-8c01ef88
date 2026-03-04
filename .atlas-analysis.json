@@ -1,0 +1,208 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "GitSpace",
+  "projectDescription": "Git worktree workspace manager with secure remote terminal access",
+  "theme": "aspen",
+  "primaryColor": "#04d65e",
+  "lightColor": "#048c3c",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/projects",
+              "concepts/workspaces",
+              "concepts/bundles",
+              "concepts/scripts"
+            ]
+          },
+          {
+            "group": "Workspace Management",
+            "pages": [
+              "workspace/creating",
+              "workspace/switching",
+              "workspace/configuration",
+              "workspace/session-mode"
+            ]
+          },
+          {
+            "group": "Remote Access",
+            "pages": [
+              "remote/overview",
+              "remote/identity",
+              "remote/gitspace-sh",
+              "remote/self-hosted",
+              "remote/security"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/linear",
+              "integrations/github"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/tui",
+              "guides/custom-scripts",
+              "guides/bundle-creation",
+              "guides/team-onboarding"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Project Commands",
+            "pages": [
+              "cli/project/add",
+              "cli/project/list",
+              "cli/project/remove"
+            ]
+          },
+          {
+            "group": "Workspace Commands",
+            "pages": [
+              "cli/workspace/add",
+              "cli/workspace/list",
+              "cli/workspace/context",
+              "cli/workspace/remove",
+              "cli/workspace/bundle"
+            ]
+          },
+          {
+            "group": "Identity & Access",
+            "pages": [
+              "cli/user/identity",
+              "cli/user/auth",
+              "cli/invite"
+            ]
+          },
+          {
+            "group": "Remote Access",
+            "pages": [
+              "cli/machine/serve",
+              "cli/machine/enroll",
+              "cli/client/connect",
+              "cli/client/machines"
+            ]
+          },
+          {
+            "group": "Relay Server",
+            "pages": [
+              "cli/relay/start",
+              "cli/relay/machines"
+            ]
+          },
+          {
+            "group": "Hosting",
+            "pages": [
+              "cli/host/reserve",
+              "cli/host/status"
+            ]
+          },
+          {
+            "group": "Terminal Sessions",
+            "pages": [
+              "cli/tmux/overview",
+              "cli/tmux/commands"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "cli/config/linear"
+            ]
+          },
+          {
+            "group": "Other Commands",
+            "pages": [
+              "cli/status",
+              "cli/cloud",
+              "cli/review"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "System Design",
+            "pages": [
+              "architecture/overview",
+              "architecture/directory-structure",
+              "architecture/encryption",
+              "architecture/protocol"
+            ]
+          },
+          {
+            "group": "Advanced Topics",
+            "pages": [
+              "advanced/troubleshooting",
+              "advanced/environment-variables",
+              "advanced/development"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Git worktree-based workspace isolation",
+    "Interactive TUI for project and workspace management",
+    "End-to-end encrypted remote terminal access",
+    "Linear integration for issue-based workflows",
+    "Convention-based custom scripts (setup, select, remove)",
+    "Repo config bundles for team onboarding",
+    "Self-hosted or gitspace.sh relay options",
+    "Identity-based access control with Ed25519/X25519"
+  ],
+  "publicApiSurface": [
+    "gssh (TUI launcher)",
+    "gssh project add",
+    "gssh workspace add",
+    "gssh workspace context",
+    "gssh project list",
+    "gssh workspace list",
+    "gssh workspace remove",
+    "gssh project remove",
+    "gssh user identity init",
+    "gssh user identity show",
+    "gssh user identity recover",
+    "gssh user auth login",
+    "gssh user auth logout",
+    "gssh user auth status",
+    "gssh user host reserve",
+    "gssh user host status",
+    "gssh machine serve start",
+    "gssh machine serve stop",
+    "gssh machine enroll",
+    "gssh client connect",
+    "gssh client machines list",
+    "gssh relay start",
+    "gssh relay machines list",
+    "gssh invite relay-machine create",
+    "gssh machine tmux start",
+    "gssh machine tmux list",
+    "gssh user config linear setup",
+    "gssh workspace bundle status",
+    "gssh status"
+  ]
+}
